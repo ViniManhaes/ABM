@@ -1,0 +1,1274 @@
+;; ATENÇÂO -> cada agente deve calcular algum(s) indicador(s) específico(s) cujo resultado determina a sua estratégia
+breed [IUs IU]
+breed [ISPs ISP]
+breed [ICTs ICT ]
+breed [APs AP]
+
+globals [
+  economic-efficiency-index
+  universal-access-index
+  innovation-index
+  all-segments ;; all market segments explored in the Internet
+  max-portfolio-variety-per-segment
+  net-neutrality
+  innovation-policy
+  internet-coverage
+  avg-ICT-investment
+  avg-AP-quality
+  avg-AP-variety
+]
+
+IUs-own [
+  prefered-segment     ;; segment type of use
+  IU-internet-usage ;; level of data used by IU
+  IU-budget         ;; max amount the IU can pay for Internet access
+  contracted-ISP         ;; ID of contracted ISP
+  patience       ;; amount of turns IU got negative utility
+  IU-congestion-tolerance
+]
+
+ISPs-own [
+  infrastructure-quality    ;; quality of the technology employed
+  infrastructure-size         ;; size of the infrastructure built
+  ISP-mg-cost              ;; ISP marginal cost (FALTA FUNÇÂO PARA DEFINIR O CALCULO DO CUSTO MARGINAL)
+  ISP-asking-price         ;; price charged for internet access
+  ISP-strategic-behavior
+  ISP-strategy
+  ISP-accepted-congestion
+  ISP-return-investment-time  ;; time until last investmment is paid back and ISP can make another one
+  ISP-target-sales
+  contracted-ICT
+  ISP-investment-growth
+  ISP-total-investment-growth
+]
+
+ICTs-own [
+  bt-cost ;; (FALTA FUNÇÂO PARA DEFINIR O CALCULO DO CUSTO MARGINAL)
+  bt-costmodifier
+  bt-quality
+  ICT-making-R&D-investment
+  ICT-asking-price
+  ICT-target-clients
+  ICT-investment-growth
+  ICT-total-investment-growth
+  ICT-return-investment-time
+]
+
+APs-own [
+  segment        ;; list with all segments which the AP operates
+  new-segment-learning   ;; percentage of domination of new segment technologies
+  portfolio-quality    ;; quality of all content the cp offers
+  portfolio-variety    ;; variety of all content the cp offers
+  portfolio-mintech-req ;; minimum technology required to fully utilize the content provided
+  portfolio-congestion-cost  ;; impact of congestion on the content provided
+  AP-strategic-behavior
+  AP-target-market-share
+  AP-investment-growth
+  AP-total-investment-growth
+]
+
+;; observar a demanda em cada zona para escolher uma das 3 para investir
+;; depois disso selecionar um ponto aleatorio na zona escolhida e decidir o investimento
+
+;;
+;; Setup Procedures
+;;
+
+to setup
+  clear-all
+  set all-segments 4
+  set max-portfolio-variety-per-segment 20
+  set net-neutrality true
+  set innovation-policy false
+  set avg-ICT-investment 1
+  set avg-AP-quality 0
+  set avg-AP-variety 1
+  create-IUs IU-initial-population [ IU-setup ]
+  create-APs AP-initial-population [ AP-setup ]
+  create-ISPs ISP-initial-population [ ISP-setup ]
+  create-ICTs ICT-initial-population [ ICT-setup ]
+  reset-ticks
+end
+
+to IU-setup ;; Internet User setup
+  set prefered-segment random-in-range 0 all-segments
+  set IU-internet-usage random-normal 1 0.2
+  set IU-budget random-normal 30 5
+  set contracted-ISP "none"
+  set patience random-in-range 1 3
+  set IU-congestion-tolerance random-normal 0.8 0.15
+ end
+
+to AP-setup ;; Application Provider setup
+  let temp random-in-range 0 all-segments
+  if temp = 0 [ set segment [ 0 ] ]
+  if temp = 1 [ set segment [ 1 ] ]
+  if temp = 2 [ set segment [ 2 ] ]
+  if temp = 3 [ set segment [ 3 ] ]
+  if temp = 4 [ set segment [ 4 ] ]
+  set new-segment-learning random-normal 70 10
+  if new-segment-learning > 100 [ set new-segment-learning 100 ]
+  set portfolio-quality random-normal 2 0.5
+  set portfolio-variety random-normal 5 2
+  set portfolio-mintech-req random-normal 1 0.05
+  set portfolio-congestion-cost random-normal 1 0.05
+  set AP-target-market-share random-normal ( IU-initial-population * 0.8 / ( AP-initial-population ) ) ( 0.1 * ( IU-initial-population / AP-initial-population ) )
+ end
+
+to ISP-setup ;; Internet Service Provider setup
+  set infrastructure-quality random-normal 2 0.25
+  set infrastructure-size random-normal 100 25
+  set ISP-asking-price random-normal 30 2.5
+  set ISP-mg-cost random-normal 15 2.5  ;; PRECISA DE UMA FUNÇÂO MELHOR
+  ifelse random-in-range 0 1 = 0 [ set ISP-strategy "high risk" ] [ set ISP-strategy "low risk" ]
+  ifelse random-in-range 0 1 = 0 [ set ISP-accepted-congestion random-normal 0.75 0.05 ] [ set ISP-accepted-congestion random-normal 1.1 0.05 ]
+  set ISP-return-investment-time 0
+  set ISP-target-sales random-normal ( IU-initial-population * 0.8 / ( ISP-initial-population ) ) ( 0.1 * ( IU-initial-population / ISP-initial-population ) )
+ end
+
+to ICT-setup ;; Hardware firm setup
+  set bt-costmodifier 100
+  set bt-quality random-normal 1 0.025
+  set bt-cost random-normal 1 0.025
+  set ICT-making-R&D-investment false
+  set ICT-target-clients 1
+  set ICT-total-investment-growth 0
+  set ICT-return-investment-time 0
+end
+
+;;
+;; Internet user procedures
+;;
+
+to-report IU-utility [ desired-ISP desired-IU ]  ;;     ;; return IU utility from ISP
+  let utility 0
+  let congestion-tolerance [ IU-congestion-tolerance ] of desired-IU
+  let internet-usage [ IU-internet-usage ] of desired-IU
+  let budget [ IU-budget ] of desired-IU
+  ifelse desired-ISP = "none" [ set utility 0 ]
+  [
+    let asking-price [ ISP-asking-price ] of desired-ISP
+    let accepted-congestion [ ISP-accepted-congestion ] of desired-ISP
+    ifelse net-neutrality = true [
+      ifelse budget >= asking-price [
+        ask desired-ISP [
+          ifelse congestion-tolerance <= accepted-congestion
+          [ set utility random-normal -0.5 0.5 ]
+          [ set utility random-normal 0.5 0.5 ]
+        ]
+      ]
+      [ set utility -1 ] ]
+    [ ifelse budget >= asking-price * internet-usage [
+      ask desired-ISP [
+        ifelse congestion-tolerance <= accepted-congestion
+        [ set utility random-normal -0.5 0.5 ]
+        [ set utility random-normal 0.5 0.5 ]
+      ]
+      ]
+      [ set utility -1 ] ]
+  ]
+
+  report utility
+end
+
+to-report potential-users-on-segment [ desired-segment ]  ;; reports amount of potential internet users (ones that are not purchasing access) on desired segment
+  let temp 0
+  ask IUs [
+    if desired-segment = prefered-segment [
+      if contracted-ISP = "none" [ set temp ( temp + 1 ) ]
+    ]
+  ]
+  report temp
+end
+
+to-report ISP-coverage  ;; reports amount of potential internet users (ones that are not purchasing access) on desired segment
+  let temp 0
+  ask IUs [
+    if contracted-ISP = "none" [ set temp ( temp + 1 ) ]
+  ]
+  report ( ( IU-initial-population - temp ) / IU-initial-population ) * 100
+end
+
+to-report clients-on-segment [ desired-segment ]  ;; reports amount of internet users consuming content on desired segment
+  let temp 0
+  ask IUs [
+    if desired-segment = prefered-segment [
+      if contracted-ISP != "none" [ set temp ( temp + 1 ) ]
+    ]
+  ]
+  report temp
+end
+
+to IU-procedure          ;; ask IUs to defines from which ISP to purchase Internet access
+  if IU-utility contracted-ISP self <= 0 [
+    set patience patience + 1
+    chose-ISP
+    ifelse IU-utility contracted-ISP self < 0 [ ;; If the IU gets negative utility for more than 3 turns, he runs out of patience and does not purchase access
+      if  patience > 3 [ set contracted-ISP "none" ]
+    ]
+    [ set patience 0 ]
+  ]
+end
+
+to chose-ISP ;; chose another ISP to contract access ( has a chance to stick with current ISP, but the chance is smaller the better the rivals offers)
+  let new-ISP contracted-ISP
+  let desired-IU self
+  ask ISPs [
+    if IU-utility self desired-IU > 0 [
+      if random-in-range 0 2 = 0 [ set new-ISP self ]
+    ]
+  ]
+  set contracted-ISP new-ISP
+end
+
+;;
+;; Internet Service Provider procedures
+;;
+
+to-report ISP-congestion  ;; return ISP congestion (total consumers * usage level ) / infrastructure-size
+  let temp 0
+  let me self
+  ask IUs [
+    if contracted-ISP = me [ set temp temp + IU-internet-usage ]
+  ]
+  report temp / infrastructure-size
+end
+
+to-report ISP-average-investment-growth
+  report ISP-total-investment-growth / ticks
+end
+
+to-report min-infrastructure-quality
+  report [ infrastructure-quality ] of min-one-of ISPs [ infrastructure-quality ]
+end
+
+to-report max-infrastructure-quality
+  report [ infrastructure-quality ] of max-one-of ISPs [ infrastructure-quality ]
+end
+
+to-report min-ISP-asking-price
+  report [ ISP-asking-price ] of min-one-of ISPs [ ISP-asking-price ]
+end
+
+to-report max-ISP-asking-price
+  report [ ISP-asking-price ] of max-one-of ISPs [ ISP-asking-price ]
+end
+
+to ISP-investment     ;; defines ISP investment (maybe inside ISP-procedure)
+    if ISP-strategic-behavior = "expand" [ ISP-expand-investment ]
+    if ISP-strategic-behavior = "new tech" [ ISP-new-tech-investment ]
+    if ISP-strategic-behavior = "decrease price" [ ISP-define-price ]
+end
+
+to ISP-define-strategic-behavior
+  ifelse ISP-good-sales? = false [
+    ifelse ISP-client-are-price-sensitive? = true [
+      ifelse ISP-can-decrease-prices? = true [
+        set ISP-strategic-behavior "decrease price" ] [ ISP-investment-strategy ]
+  ] [ ISP-investment-strategy ] ]
+    [ set ISP-strategic-behavior "do nothing" ]
+end
+
+to ISP-investment-strategy
+  ifelse ISP-can-make-investment? [
+    ifelse ISP-is-network-congested? = true [ set ISP-strategic-behavior "expand" ] [ set ISP-strategic-behavior "new tech" ]
+  ] [ set ISP-strategic-behavior "do nothing" ]
+end
+
+to-report ISP-good-sales? ;;; report true if number of clients is above minimum desired
+  let temp 0
+  let temp-ISP self
+  ask IUs [
+    if contracted-ISP = temp-ISP [ set temp temp + 1 ]
+  ]
+  ifelse temp >= ISP-target-sales [ report true ] [ report false ]
+end
+
+to-report ISP-client-are-price-sensitive?  ;;; PRECISA DEFINIR
+  ifelse random-in-range 0 1 = 0 [ report true ] [ report false ]
+end
+
+to-report ISP-can-decrease-prices?
+  ifelse ISP-asking-price > ISP-mg-cost [ report true ] [report false ]
+end
+
+to-report ISP-can-make-investment?
+  ifelse  ISP-return-investment-time <= 0 [ report true ] [ report false ]
+end
+
+to-report ISP-is-network-congested?
+  ifelse ISP-congestion > ISP-accepted-congestion [ report true ] [ report false ]
+end
+
+to ISP-expand-investment  ;; expands infrastructure size and increase marginal costs
+  if random-in-range 0 1 = 0 [
+    set infrastructure-size infrastructure-size + 1
+    set ISP-return-investment-time 15
+  ]
+end
+
+to ISP-new-tech-investment ;; implement new technology, keep infrastructure size and (may) increase marginal
+  if ISP-strategy = "high risk" [ ;; parametrizar em a e B as preferências por qualidade e preço do ISP
+    set contracted-ICT who-best-infrastructure-quality
+    buy-infrastructure-from contracted-ICT
+    set ISP-return-investment-time 30
+  ]
+  if ISP-strategy = "low risk" [ ;; implementar probabilidade de comprar qualidade
+    ifelse EC-innovation > 2 [ ifelse random-in-range 0 100 < 50 [ set contracted-ICT who-best-infrastructure-quality ] [ set contracted-ICT who-min-infrastructure-price ] ]
+    [ set contracted-ICT who-min-infrastructure-price ]
+    ;;ifelse random-in-range 0 100 < 50 [ set contracted-ICT who-best-infrastructure-quality ] [ set contracted-ICT who-min-infrastructure-price ]
+    buy-infrastructure-from contracted-ICT
+    set ISP-return-investment-time 20
+  ]
+end
+
+to buy-infrastructure-from [ chosen-ICT ]
+  if infrastructure-quality < [ bt-quality ] of chosen-ICT [ set infrastructure-quality [ bt-quality ] of chosen-ICT ]
+end
+
+to ISP-define-price
+  ask ISPs [
+    ifelse ISP-good-sales? = true [ ISP-change-price 1 ] [ ISP-change-price -1 ]
+    if ISP-asking-price < ISP-mg-cost [ set ISP-asking-price ISP-mg-cost ]
+  ]
+end
+
+to ISP-procedure           ;; ask ISPs procedure to collect profits, define investments and set products
+  ISP-define-strategic-behavior
+  ISP-investment
+  set ISP-return-investment-time ISP-return-investment-time - 1
+end
+
+;;
+;; Application Provider procedures
+;;
+
+to-report segment-quality [ desired-segment ] ;; reports the sum of portfolio quality availble in the desired segment
+  let temp 0
+  ask APs [
+    if member? desired-segment segment [
+      ifelse desired-segment = last segment
+      [ set temp temp + ( portfolio-quality / ( new-segment-learning / 100 ) ) ]
+      [ set temp temp + portfolio-quality ]
+    ]
+  ]
+  report temp
+end
+
+to-report AP-average-investment-growth
+  report AP-total-investment-growth / ticks
+end
+
+to-report AP-average-quality
+  let temp 0
+  ask APs [ set temp temp + portfolio-quality ]
+  report temp / AP-initial-population
+end
+
+to-report AP-average-variety
+  let temp 0
+  ask APs [ set temp temp + portfolio-variety ]
+  report temp / AP-initial-population
+end
+
+to AP-investment     ;; defines AP investment
+  if AP-strategic-behavior = "horizontal" [ AP-horizontal-investment ]
+  if AP-strategic-behavior = "vertical" [ AP-vertical-investment ]
+  if AP-strategic-behavior = "new segment" [ AP-new-segment ]  ;; can only try new segment once the most recent is completly dominated
+  if AP-strategic-behavior = "develop new segment" [ AP-develop-segment ]
+end
+
+to AP-strategy
+  foreach segment [ i ->
+    ifelse AP-relevant-segement? i = true [
+      ifelse AP-segment-underdeveloped? = true [
+        set AP-strategic-behavior "develop new segment" ]
+      [ AP-R&D ]
+    ] [ AP-R&D ]
+  ]
+end
+
+to AP-R&D
+  ifelse increase-quality-is-costly? = true [
+    ifelse increase-variety? = true [ set AP-strategic-behavior "horizontal" ]
+    [ ifelse segments-fully-explored? = true [ set AP-strategic-behavior "new segment" ] [ set AP-strategic-behavior "develop new segment" ] ] ]
+    [ set AP-strategic-behavior "vertical" ]
+end
+
+to-report AP-relevant-segement? [ desired-segment ]  ;;; report the relevance of the segment
+  ifelse clients-on-segment desired-segment > AP-target-market-share [ report true] [ report false ]
+end
+
+
+to-report AP-segment-underdeveloped?
+  ifelse new-segment-learning >= 100 and ( portfolio-variety / length segment ) >= max-portfolio-variety-per-segment [ report false ] [report true ]
+end
+
+to-report segments-fully-explored?
+  ifelse new-segment-learning >= 100 [ report true ] [report false ]
+end
+
+to-report increase-variety?
+  ifelse ( portfolio-variety / length segment ) >= max-portfolio-variety-per-segment [ report false ] [report true ]
+end
+
+to-report increase-quality-is-costly?  ;;; PRECISA DEFINIR
+  ifelse min-infrastructure-quality < portfolio-mintech-req [ report true ] [report false ]
+end
+
+to AP-horizontal-investment  ;; ATENÇÂO -> variedade de conteúdo deve ser limitada por "length all-segments"
+  let portfolio-modifier random-normal 1.01 0.0025
+  let portfolio-mintech-modifier random-normal 1.01 0.0025
+  let portfolio-congestion-modifier random-normal 1.01 0.0025
+  if portfolio-mintech-modifier * portfolio-mintech-req <= min-infrastructure-quality [
+    set portfolio-variety ( portfolio-variety * portfolio-modifier )
+    set portfolio-mintech-req ( portfolio-mintech-req * portfolio-mintech-modifier )
+    set portfolio-congestion-cost ( portfolio-congestion-cost * portfolio-congestion-modifier )
+  ]
+end
+
+to AP-new-segment
+  let temp ( random-in-range 0 all-segments )
+  let new-segment "yes"
+  if member? temp segment [ set new-segment "no" ]
+  if new-segment = "yes" [
+    set segment lput temp segment
+    set new-segment-learning 0
+  ]
+end
+
+to AP-develop-segment
+  let temp ( new-segment-learning + random-in-range 0 5 )
+  ifelse temp < 100 [ set new-segment-learning temp ] [ set new-segment-learning 100 ]
+end
+
+to AP-vertical-investment
+  let portfolio-modifier random-normal 1.05 0.01
+  let portfolio-mintech-modifier random-normal 1.05 0.01
+  let portfolio-congestion-modifier random-normal 1.05 0.01
+  if portfolio-mintech-modifier * portfolio-mintech-req <= min-infrastructure-quality [
+    set portfolio-quality ( portfolio-quality * portfolio-modifier )
+    set portfolio-mintech-req ( portfolio-mintech-req * portfolio-mintech-modifier )
+    set portfolio-congestion-cost ( portfolio-congestion-cost * portfolio-congestion-modifier )
+  ]
+end
+
+to AP-procedure         ;; ask APs procedure to collect profits, define investments and set products
+  AP-strategy
+  AP-investment
+end
+
+;;
+;; ICT FIrm procedures
+;;
+
+to-report min-ICT-tech
+  report [ bt-quality ] of min-one-of ICTs [ bt-quality ]
+end
+
+to-report max-ICT-tech
+  report [ bt-quality ] of max-one-of ICTs [ bt-quality ]
+end
+
+to-report ICT-good-sales? ;;; report true if number of clients is above minimum desired
+  let temp 0
+  let temp-ICT self
+  ask ISPs [
+    if contracted-ICT = temp-ICT [ set temp temp + 1 ]
+  ]
+  ifelse temp >= ICT-target-clients [ report true ] [ report false ]
+end
+
+to-report ICT-average-investment-growth
+  let temp 0
+  ask ICTs [ set temp temp + ICT-investment-growth ]
+  report temp / ICT-initial-population
+end
+
+to-report who-min-infrastructure-price
+  let min-price [ ICT-asking-price ] of min-one-of ICTs [ ICT-asking-price ]
+  report one-of ICTs with [ ICT-asking-price = min-price ]
+end
+
+to-report who-best-infrastructure-quality
+  let best-quality [ bt-quality ] of max-one-of ICTs [ bt-quality ]
+  report one-of ICTs with [ bt-quality = best-quality ]
+end
+
+to-report ICT-make-R&D-investment?
+  ifelse ICT-return-investment-time > 0 [ report false ] [
+    set ICT-making-R&D-investment false
+    ifelse innovation-policy = true [
+      ifelse random-normal 1 0.2 < 1.2 [ report true ] [report false ] ] [
+      ifelse random-normal 1 0.2 < 0.2 [ report true ] [report false ]
+    ]
+  ]
+end
+
+to ICT-decreasecost
+  let temp random-normal -0.01 0.01
+  if temp < 0 [ set bt-cost bt-cost + temp ]
+  set ICT-investment-growth random-normal 1.05 0.01
+  set ICT-return-investment-time random-in-range 9 12
+  set ICT-making-R&D-investment true
+end
+
+to ICT-newlinktech
+  let new-tech-quality bt-quality * ( random-normal 1.3 0.1 )
+  let new-tech-cost bt-cost * ( random-normal 2 0.25 )
+  ifelse ( bt-quality * new-tech-quality / bt-cost * new-tech-cost ) > ( bt-quality / bt-cost ) [ ;; If new tech quality/cost is better than old tech, change tech
+    set bt-quality bt-quality * new-tech-quality
+    set bt-cost bt-cost * new-tech-cost
+    set ICT-investment-growth random-normal 1.12 0.02
+    set ICT-return-investment-time random-in-range 18 24
+    set ICT-making-R&D-investment true
+  ] [
+    set ICT-investment-growth random-normal 1.05 0.01
+    set ICT-return-investment-time random-in-range 9 12
+    set ICT-making-R&D-investment true  ]
+end
+
+to ICT-investment
+  ifelse ICT-make-R&D-investment? = true [
+    ifelse bt-cost > 1 [ ICT-decreasecost ] [
+      ifelse bt-cost > 0.5 [ ifelse random-in-range 1 2 = 1 [ ICT-decreasecost ] [ ICT-newlinktech ] ]
+      [ ICT-newlinktech ]
+    ]
+  ] [ if ICT-making-R&D-investment = false [ set ICT-investment-growth random-normal 0.99 0.01 ] ]
+end
+
+to ICT-procedure         ;; ask ICTs procedure to collect profits, define investments and set products
+  ICT-investment
+  ICT-define-price
+  ;; set ICT-total-investment-growth ICT-total-investment-growth + ICT-investment-growth
+  ifelse innovation-policy = true [ set ICT-return-investment-time ( ICT-return-investment-time - 2 ) ]
+  [ set ICT-return-investment-time ( ICT-return-investment-time - 1 ) ]
+end
+
+to ICT-define-price
+  ifelse ICT-good-sales? = true [ ICT-change-price 2.5 ] [ ICT-change-price -2.5 ]
+  if ICT-asking-price < bt-cost [ set ICT-asking-price bt-cost ]
+end
+
+;;
+;; Runtime Procedures
+;;
+
+to run-economy
+  ask ICTs [ ICT-procedure ]
+  ask IUs [ IU-procedure ]
+  ask APs [ AP-procedure ]
+  ask ISPS [ ISP-procedure ]
+
+  set internet-coverage ISP-coverage
+  set avg-ICT-investment ICT-average-investment-growth
+  set avg-AP-quality AP-average-quality
+  set avg-AP-variety AP-average-variety
+
+end
+
+to-report EC-index
+  report ( ( EC-economic-efficiency * economic-efficiency-index ) + ( EC-universal-access * universal-access-index ) + ( EC-innovation + innovation-index ) ) / ( EC-economic-efficiency + EC-universal-access + EC-innovation )
+end
+
+to regulator-action    ;; if EC-index < satisfatory -> change rule randomly
+  if internet-coverage < random-normal ( 40 + ( EC-universal-access * 10 ) ) 5 [ ifelse net-neutrality = true [ set net-neutrality false ] [ set net-neutrality true ] ]
+  if avg-ICT-investment < random-normal ( 0.96 + ( EC-innovation / 20 ) ) 0.01 [ ifelse innovation-policy = true [ set innovation-policy false ] [ set innovation-policy true ] ]
+end
+
+to go
+  run-economy  ;; não sei como faço para circular o dinheiro entre os agentes
+  regulator-action  ;; 3 rules (Prioritized Pay, Metered/Usage-Based Billing, and Zero Rating/Sponsored Data) 9 combinations
+  tick
+
+end
+
+
+;;
+;; Utilities
+;;
+
+to ICT-change-price [ change ]
+  let before ICT-asking-price
+  let percent ( 1 + (change / 100) )
+  set ICT-asking-price ( before * percent )
+end
+
+to ISP-change-price [ change ]
+  let before ISP-asking-price
+  let percent ( 1 + (change / 100) )
+  set ISP-asking-price ( before * percent )
+end
+
+to-report random-in-range [low high]
+  report low + random (high - low + 1)
+end
+@#$#@#$#@
+GRAPHICS-WINDOW
+3
+10
+856
+864
+-1
+-1
+13.0
+1
+10
+1
+1
+1
+0
+1
+1
+1
+-32
+32
+-32
+32
+0
+0
+1
+ticks
+30.0
+
+BUTTON
+1067
+31
+1130
+64
+NIL
+setup
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+1067
+68
+1130
+101
+NIL
+go
+T
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+864
+22
+1041
+55
+EC-economic-efficiency
+EC-economic-efficiency
+1
+3
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+864
+63
+1036
+96
+EC-universal-access
+EC-universal-access
+1
+3
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+863
+105
+1035
+138
+EC-innovation
+EC-innovation
+1
+3
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+161
+1034
+194
+IU-initial-population
+IU-initial-population
+100
+2000
+850.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+199
+1034
+232
+AP-initial-population
+AP-initial-population
+1
+20
+15.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+240
+1034
+273
+ISP-initial-population
+ISP-initial-population
+1
+5
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+278
+1034
+311
+ICT-initial-population
+ICT-initial-population
+1
+5
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+1166
+33
+1533
+305
+ISP coverage
+NIL
+NIL
+0.0
+100.0
+0.0
+100.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot internet-coverage"
+
+PLOT
+862
+597
+1197
+827
+ICT average investment
+NIL
+NIL
+1.0
+1.2
+1.0
+1.2
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot avg-ICT-investment"
+
+PLOT
+1624
+18
+1992
+297
+Average AP quality
+NIL
+NIL
+1.0
+5.0
+1.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot avg-AP-quality"
+"pen-1" 1.0 0 -955883 true "" "plot avg-AP-variety"
+
+PLOT
+1245
+326
+1610
+602
+ISP Infrastructure quality
+NIL
+NIL
+0.95
+2.0
+0.95
+2.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -13345367 true "" "plot min-infrastructure-quality"
+"pen-1" 1.0 0 -16777216 true "" "plot max-infrastructure-quality"
+
+PLOT
+1624
+327
+2008
+603
+ISP Asking Price
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -2674135 true "" "plot min-ISP-asking-price"
+"pen-1" 1.0 0 -12087248 true "" "plot max-ISP-asking-price"
+
+PLOT
+862
+329
+1191
+590
+ICT technology quality
+NIL
+NIL
+1.0
+2.0
+1.0
+2.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot min-ICT-tech"
+"pen-1" 1.0 0 -3844592 true "" "plot max-ICT-tech"
+
+@#$#@#$#@
+## WHAT IS IT?
+
+(a general understanding of what the model is trying to show or explain)
+
+## HOW IT WORKS
+
+(what rules the agents use to create the overall behavior of the model)
+
+## HOW TO USE IT
+
+(how to use the model, including a description of each of the items in the Interface tab)
+
+## THINGS TO NOTICE
+
+(suggested things for the user to notice while running the model)
+
+## THINGS TO TRY
+
+(suggested things for the user to try to do (move sliders, switches, etc.) with the model)
+
+## EXTENDING THE MODEL
+
+(suggested things to add or change in the Code tab to make the model more complicated, detailed, accurate, etc.)
+
+## NETLOGO FEATURES
+
+(interesting or unusual features of NetLogo that the model uses, particularly in the Code tab; or where workarounds were needed for missing features)
+
+## RELATED MODELS
+
+(models in the NetLogo Models Library and elsewhere which are of related interest)
+
+## CREDITS AND REFERENCES
+
+(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+@#$#@#$#@
+default
+true
+0
+Polygon -7500403 true true 150 5 40 250 150 205 260 250
+
+airplane
+true
+0
+Polygon -7500403 true true 150 0 135 15 120 60 120 105 15 165 15 195 120 180 135 240 105 270 120 285 150 270 180 285 210 270 165 240 180 180 285 195 285 165 180 105 180 60 165 15
+
+arrow
+true
+0
+Polygon -7500403 true true 150 0 0 150 105 150 105 293 195 293 195 150 300 150
+
+box
+false
+0
+Polygon -7500403 true true 150 285 285 225 285 75 150 135
+Polygon -7500403 true true 150 135 15 75 150 15 285 75
+Polygon -7500403 true true 15 75 15 225 150 285 150 135
+Line -16777216 false 150 285 150 135
+Line -16777216 false 150 135 15 75
+Line -16777216 false 150 135 285 75
+
+bug
+true
+0
+Circle -7500403 true true 96 182 108
+Circle -7500403 true true 110 127 80
+Circle -7500403 true true 110 75 80
+Line -7500403 true 150 100 80 30
+Line -7500403 true 150 100 220 30
+
+butterfly
+true
+0
+Polygon -7500403 true true 150 165 209 199 225 225 225 255 195 270 165 255 150 240
+Polygon -7500403 true true 150 165 89 198 75 225 75 255 105 270 135 255 150 240
+Polygon -7500403 true true 139 148 100 105 55 90 25 90 10 105 10 135 25 180 40 195 85 194 139 163
+Polygon -7500403 true true 162 150 200 105 245 90 275 90 290 105 290 135 275 180 260 195 215 195 162 165
+Polygon -16777216 true false 150 255 135 225 120 150 135 120 150 105 165 120 180 150 165 225
+Circle -16777216 true false 135 90 30
+Line -16777216 false 150 105 195 60
+Line -16777216 false 150 105 105 60
+
+car
+false
+0
+Polygon -7500403 true true 300 180 279 164 261 144 240 135 226 132 213 106 203 84 185 63 159 50 135 50 75 60 0 150 0 165 0 225 300 225 300 180
+Circle -16777216 true false 180 180 90
+Circle -16777216 true false 30 180 90
+Polygon -16777216 true false 162 80 132 78 134 135 209 135 194 105 189 96 180 89
+Circle -7500403 true true 47 195 58
+Circle -7500403 true true 195 195 58
+
+circle
+false
+0
+Circle -7500403 true true 0 0 300
+
+circle 2
+false
+0
+Circle -7500403 true true 0 0 300
+Circle -16777216 true false 30 30 240
+
+cow
+false
+0
+Polygon -7500403 true true 200 193 197 249 179 249 177 196 166 187 140 189 93 191 78 179 72 211 49 209 48 181 37 149 25 120 25 89 45 72 103 84 179 75 198 76 252 64 272 81 293 103 285 121 255 121 242 118 224 167
+Polygon -7500403 true true 73 210 86 251 62 249 48 208
+Polygon -7500403 true true 25 114 16 195 9 204 23 213 25 200 39 123
+
+cylinder
+false
+0
+Circle -7500403 true true 0 0 300
+
+dot
+false
+0
+Circle -7500403 true true 90 90 120
+
+face happy
+false
+0
+Circle -7500403 true true 8 8 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Polygon -16777216 true false 150 255 90 239 62 213 47 191 67 179 90 203 109 218 150 225 192 218 210 203 227 181 251 194 236 217 212 240
+
+face neutral
+false
+0
+Circle -7500403 true true 8 7 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Rectangle -16777216 true false 60 195 240 225
+
+face sad
+false
+0
+Circle -7500403 true true 8 8 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Polygon -16777216 true false 150 168 90 184 62 210 47 232 67 244 90 220 109 205 150 198 192 205 210 220 227 242 251 229 236 206 212 183
+
+fish
+false
+0
+Polygon -1 true false 44 131 21 87 15 86 0 120 15 150 0 180 13 214 20 212 45 166
+Polygon -1 true false 135 195 119 235 95 218 76 210 46 204 60 165
+Polygon -1 true false 75 45 83 77 71 103 86 114 166 78 135 60
+Polygon -7500403 true true 30 136 151 77 226 81 280 119 292 146 292 160 287 170 270 195 195 210 151 212 30 166
+Circle -16777216 true false 215 106 30
+
+flag
+false
+0
+Rectangle -7500403 true true 60 15 75 300
+Polygon -7500403 true true 90 150 270 90 90 30
+Line -7500403 true 75 135 90 135
+Line -7500403 true 75 45 90 45
+
+flower
+false
+0
+Polygon -10899396 true false 135 120 165 165 180 210 180 240 150 300 165 300 195 240 195 195 165 135
+Circle -7500403 true true 85 132 38
+Circle -7500403 true true 130 147 38
+Circle -7500403 true true 192 85 38
+Circle -7500403 true true 85 40 38
+Circle -7500403 true true 177 40 38
+Circle -7500403 true true 177 132 38
+Circle -7500403 true true 70 85 38
+Circle -7500403 true true 130 25 38
+Circle -7500403 true true 96 51 108
+Circle -16777216 true false 113 68 74
+Polygon -10899396 true false 189 233 219 188 249 173 279 188 234 218
+Polygon -10899396 true false 180 255 150 210 105 210 75 240 135 240
+
+house
+false
+0
+Rectangle -7500403 true true 45 120 255 285
+Rectangle -16777216 true false 120 210 180 285
+Polygon -7500403 true true 15 120 150 15 285 120
+Line -16777216 false 30 120 270 120
+
+leaf
+false
+0
+Polygon -7500403 true true 150 210 135 195 120 210 60 210 30 195 60 180 60 165 15 135 30 120 15 105 40 104 45 90 60 90 90 105 105 120 120 120 105 60 120 60 135 30 150 15 165 30 180 60 195 60 180 120 195 120 210 105 240 90 255 90 263 104 285 105 270 120 285 135 240 165 240 180 270 195 240 210 180 210 165 195
+Polygon -7500403 true true 135 195 135 240 120 255 105 255 105 285 135 285 165 240 165 195
+
+line
+true
+0
+Line -7500403 true 150 0 150 300
+
+line half
+true
+0
+Line -7500403 true 150 0 150 150
+
+pentagon
+false
+0
+Polygon -7500403 true true 150 15 15 120 60 285 240 285 285 120
+
+person
+false
+0
+Circle -7500403 true true 110 5 80
+Polygon -7500403 true true 105 90 120 195 90 285 105 300 135 300 150 225 165 300 195 300 210 285 180 195 195 90
+Rectangle -7500403 true true 127 79 172 94
+Polygon -7500403 true true 195 90 240 150 225 180 165 105
+Polygon -7500403 true true 105 90 60 150 75 180 135 105
+
+plant
+false
+0
+Rectangle -7500403 true true 135 90 165 300
+Polygon -7500403 true true 135 255 90 210 45 195 75 255 135 285
+Polygon -7500403 true true 165 255 210 210 255 195 225 255 165 285
+Polygon -7500403 true true 135 180 90 135 45 120 75 180 135 210
+Polygon -7500403 true true 165 180 165 210 225 180 255 120 210 135
+Polygon -7500403 true true 135 105 90 60 45 45 75 105 135 135
+Polygon -7500403 true true 165 105 165 135 225 105 255 45 210 60
+Polygon -7500403 true true 135 90 120 45 150 15 180 45 165 90
+
+sheep
+false
+15
+Circle -1 true true 203 65 88
+Circle -1 true true 70 65 162
+Circle -1 true true 150 105 120
+Polygon -7500403 true false 218 120 240 165 255 165 278 120
+Circle -7500403 true false 214 72 67
+Rectangle -1 true true 164 223 179 298
+Polygon -1 true true 45 285 30 285 30 240 15 195 45 210
+Circle -1 true true 3 83 150
+Rectangle -1 true true 65 221 80 296
+Polygon -1 true true 195 285 210 285 210 240 240 210 195 210
+Polygon -7500403 true false 276 85 285 105 302 99 294 83
+Polygon -7500403 true false 219 85 210 105 193 99 201 83
+
+square
+false
+0
+Rectangle -7500403 true true 30 30 270 270
+
+square 2
+false
+0
+Rectangle -7500403 true true 30 30 270 270
+Rectangle -16777216 true false 60 60 240 240
+
+star
+false
+0
+Polygon -7500403 true true 151 1 185 108 298 108 207 175 242 282 151 216 59 282 94 175 3 108 116 108
+
+target
+false
+0
+Circle -7500403 true true 0 0 300
+Circle -16777216 true false 30 30 240
+Circle -7500403 true true 60 60 180
+Circle -16777216 true false 90 90 120
+Circle -7500403 true true 120 120 60
+
+tree
+false
+0
+Circle -7500403 true true 118 3 94
+Rectangle -6459832 true false 120 195 180 300
+Circle -7500403 true true 65 21 108
+Circle -7500403 true true 116 41 127
+Circle -7500403 true true 45 90 120
+Circle -7500403 true true 104 74 152
+
+triangle
+false
+0
+Polygon -7500403 true true 150 30 15 255 285 255
+
+triangle 2
+false
+0
+Polygon -7500403 true true 150 30 15 255 285 255
+Polygon -16777216 true false 151 99 225 223 75 224
+
+truck
+false
+0
+Rectangle -7500403 true true 4 45 195 187
+Polygon -7500403 true true 296 193 296 150 259 134 244 104 208 104 207 194
+Rectangle -1 true false 195 60 195 105
+Polygon -16777216 true false 238 112 252 141 219 141 218 112
+Circle -16777216 true false 234 174 42
+Rectangle -7500403 true true 181 185 214 194
+Circle -16777216 true false 144 174 42
+Circle -16777216 true false 24 174 42
+Circle -7500403 false true 24 174 42
+Circle -7500403 false true 144 174 42
+Circle -7500403 false true 234 174 42
+
+turtle
+true
+0
+Polygon -10899396 true false 215 204 240 233 246 254 228 266 215 252 193 210
+Polygon -10899396 true false 195 90 225 75 245 75 260 89 269 108 261 124 240 105 225 105 210 105
+Polygon -10899396 true false 105 90 75 75 55 75 40 89 31 108 39 124 60 105 75 105 90 105
+Polygon -10899396 true false 132 85 134 64 107 51 108 17 150 2 192 18 192 52 169 65 172 87
+Polygon -10899396 true false 85 204 60 233 54 254 72 266 85 252 107 210
+Polygon -7500403 true true 119 75 179 75 209 101 224 135 220 225 175 261 128 261 81 224 74 135 88 99
+
+wheel
+false
+0
+Circle -7500403 true true 3 3 294
+Circle -16777216 true false 30 30 240
+Line -7500403 true 150 285 150 15
+Line -7500403 true 15 150 285 150
+Circle -7500403 true true 120 120 60
+Line -7500403 true 216 40 79 269
+Line -7500403 true 40 84 269 221
+Line -7500403 true 40 216 269 79
+Line -7500403 true 84 40 221 269
+
+wolf
+false
+0
+Polygon -16777216 true false 253 133 245 131 245 133
+Polygon -7500403 true true 2 194 13 197 30 191 38 193 38 205 20 226 20 257 27 265 38 266 40 260 31 253 31 230 60 206 68 198 75 209 66 228 65 243 82 261 84 268 100 267 103 261 77 239 79 231 100 207 98 196 119 201 143 202 160 195 166 210 172 213 173 238 167 251 160 248 154 265 169 264 178 247 186 240 198 260 200 271 217 271 219 262 207 258 195 230 192 198 210 184 227 164 242 144 259 145 284 151 277 141 293 140 299 134 297 127 273 119 270 105
+Polygon -7500403 true true -1 195 14 180 36 166 40 153 53 140 82 131 134 133 159 126 188 115 227 108 236 102 238 98 268 86 269 92 281 87 269 103 269 113
+
+x
+false
+0
+Polygon -7500403 true true 270 75 225 30 30 225 75 270
+Polygon -7500403 true true 30 75 75 30 270 225 225 270
+@#$#@#$#@
+NetLogo 6.1.1
+@#$#@#$#@
+need-to-manually-make-preview-for-this-model
+@#$#@#$#@
+@#$#@#$#@
+<experiments>
+  <experiment name="experiment" repetitions="1" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <metric>count turtles</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="10"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="814"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="0"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="0"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
+@#$#@#$#@
+@#$#@#$#@
+default
+0.0
+-0.2 0 0.0 1.0
+0.0 1 1.0 0.0
+0.2 0 0.0 1.0
+link direction
+true
+0
+Line -7500403 true 150 150 90 180
+Line -7500403 true 150 150 210 180
+@#$#@#$#@
+0
+@#$#@#$#@

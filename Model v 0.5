@@ -1,0 +1,2588 @@
+;; ATENÇÂO -> cada agente deve calcular algum(s) indicador(s) específico(s) cujo resultado determina a sua estratégia
+breed [IUs IU]
+breed [ISPs ISP]
+breed [ICTs ICT ]
+breed [APs AP]
+
+;; indicador de inovação -> contador de rítimo de investimento
+;; indicador de eficiência -> proximidade do CMgCP com ISP-utilization-price
+
+globals [
+  economic-efficiency-index
+  universal-access-index
+  innovation-index
+  max-portfolio-quality
+  max-portfolio-variety
+  avg-ICT-investment
+  avg-AP-quality
+  avg-AP-variety
+  regulator-profile
+  regulator-policy-coinvestment
+  regulator-policy-assymetric-regulation
+  regulator-policy-min-quality
+  regulator-policy-min-congestion
+  regulator-policy-transparency
+  regulator-policy-incentivize-ISP
+  regulator-policy-Incentivize-ICT
+  regulator-policy-stimulate-demand
+  innovation-counter
+]
+
+IUs-own [
+  IU-internet-usage ;; level of data used by IU
+  IU-budget         ;; max amount the IU can pay for Internet access
+  contracted-ISP         ;; ID of contracted ISP
+  patience       ;; amount of turns IU got negative utility
+  IU-congestion-tolerance
+  prefered-AP
+  IU-mintech-req
+  IU-profile ;; user belongs to one of 3 different profile of users
+]
+
+ISPs-own [
+  infrastructure-quality    ;; quality of the technology employed
+  infrastructure-size         ;; size of the infrastructure built
+  infrastructure-cost
+  ISP-mg-cost              ;; ISP marginal cost (FALTA FUNÇÂO PARA DEFINIR O CALCULO DO CUSTO MARGINAL)
+  ISP-access-price
+  ISP-utilization-price
+  ISP-strategic-behavior
+  ISP-strategy
+  ISP-accepted-congestion
+  ISP-return-investment-time  ;; time until last investmment is paid back and ISP can make another one
+  ISP-target-sales
+  contracted-ICT
+  ISP-investment-growth
+  ISP-total-investment-growth
+  ISP-congestion
+  patience
+  ISP-markup
+]
+
+ICTs-own [
+  bt-cost ;; (FALTA FUNÇÂO PARA DEFINIR O CALCULO DO CUSTO MARGINAL)
+  bt-costmodifier
+  bt-quality
+  ICT-making-R&D-investment
+  ICT-asking-price
+  ICT-target-clients
+  ICT-investment-growth
+  ICT-total-investment-growth
+  ICT-return-investment-time
+]
+
+APs-own [
+  portfolio-quality    ;; quality of all content the cp offers
+  portfolio-variety    ;; variety of all content the cp offers
+  portfolio-mintech-req ;; minimum technology required to fully utilize the content provided
+  portfolio-congestion-cost  ;; impact of congestion on the content provided
+  AP-strategic-behavior
+  AP-target-market-share
+  AP-investment-growth
+  AP-total-investment-growth
+  AP-clients
+]
+
+;; observar a demanda em cada zona para escolher uma das 3 para investir
+;; depois disso selecionar um ponto aleatorio na zona escolhida e decidir o investimento
+
+;;
+;; Setup Procedures
+;;
+
+to setup
+  clear-all
+  set innovation-counter 0
+  set max-portfolio-quality 20
+  set max-portfolio-variety 20
+  set avg-ICT-investment 1
+  set avg-AP-quality 0
+  set avg-AP-variety 1
+  create-APs AP-initial-population [ AP-setup ]
+  create-IUs IU-initial-population [ IU-setup ]
+  create-ICTs ICT-initial-population [ ICT-setup ]
+  create-ISPs ISP-initial-population [ ISP-setup ]
+  ifelse EC-economic-efficiency + EC-universal-access + EC-innovation = 6 [
+
+    if EC-economic-efficiency = 3 [
+      if EC-universal-access = 2 [ set regulator-profile "efficiency + access" ]
+      if EC-innovation = 2 [ set regulator-profile "efficiency + innovation" ]
+    ]
+
+    if EC-universal-access = 3 [
+      if EC-economic-efficiency = 2 [ set regulator-profile "access + efficiency" ]
+      if EC-innovation = 2 [ set regulator-profile "access + innovation" ]
+    ]
+
+    if EC-innovation = 3 [
+      if EC-economic-efficiency = 2 [ set regulator-profile "innovation + efficiency" ]
+      if EC-universal-access = 2 [ set regulator-profile "innovation + access" ]
+    ]
+  ]
+  [ print "invalid regulator profile" ]
+
+  ;; regulator starting policies
+
+  if regulator-profile = "innovation + efficiency" [
+    set regulator-policy-coinvestment random-in-range 1 3
+    set regulator-policy-assymetric-regulation random-in-range 1 3
+    set regulator-policy-min-quality random-in-range 2 4
+    set regulator-policy-min-congestion random-in-range 1 3
+    set regulator-policy-transparency random-in-range 2 4
+    set regulator-policy-incentivize-ISP random-in-range 1 3
+    set regulator-policy-Incentivize-ICT random-in-range 2 4
+    set regulator-policy-stimulate-demand random-in-range 1 3
+  ]
+
+  if regulator-profile = "innovation + access" [
+    set regulator-policy-coinvestment random-in-range 2 4
+    set regulator-policy-assymetric-regulation random-in-range 2 4
+    set regulator-policy-min-quality random-in-range 3 5
+    set regulator-policy-min-congestion random-in-range 2 4
+    set regulator-policy-transparency random-in-range 1 3
+    set regulator-policy-incentivize-ISP random-in-range 2 4
+    set regulator-policy-Incentivize-ICT random-in-range 3 5
+    set regulator-policy-stimulate-demand random-in-range 1 3
+  ]
+
+  if regulator-profile = "access + innovation" [
+    set regulator-policy-coinvestment random-in-range 3 5
+    set regulator-policy-assymetric-regulation random-in-range 3 5
+    set regulator-policy-min-quality random-in-range 2 4
+    set regulator-policy-min-congestion random-in-range 1 3
+    set regulator-policy-transparency random-in-range 1 3
+    set regulator-policy-incentivize-ISP random-in-range 3 5
+    set regulator-policy-Incentivize-ICT random-in-range 2 4
+    set regulator-policy-stimulate-demand random-in-range 2 4
+  ]
+
+  if regulator-profile = "access + efficiency" [
+    set regulator-policy-coinvestment random-in-range 3 5
+    set regulator-policy-assymetric-regulation random-in-range 2 4
+    set regulator-policy-min-quality random-in-range 1 3
+    set regulator-policy-min-congestion random-in-range 1 3
+    set regulator-policy-transparency random-in-range 2 4
+    set regulator-policy-incentivize-ISP random-in-range 2 4
+    set regulator-policy-Incentivize-ICT random-in-range 1 3
+    set regulator-policy-stimulate-demand random-in-range 3 5
+  ]
+
+  if regulator-profile = "efficiency + access" [
+    set regulator-policy-coinvestment random-in-range 2 4
+    set regulator-policy-assymetric-regulation random-in-range 2 4
+    set regulator-policy-min-quality random-in-range 1 3
+    set regulator-policy-min-congestion random-in-range 1 3
+    set regulator-policy-transparency random-in-range 3 5
+    set regulator-policy-incentivize-ISP random-in-range 2 4
+    set regulator-policy-Incentivize-ICT random-in-range 1 3
+    set regulator-policy-stimulate-demand random-in-range 3 5
+  ]
+
+  if regulator-profile = "efficiency + innovation" [
+    set regulator-policy-coinvestment random-in-range 1 3
+    set regulator-policy-assymetric-regulation random-in-range 2 4
+    set regulator-policy-min-quality random-in-range 2 4
+    set regulator-policy-min-congestion random-in-range 1 3
+    set regulator-policy-transparency random-in-range 3 5
+    set regulator-policy-incentivize-ISP random-in-range 1 3
+    set regulator-policy-Incentivize-ICT random-in-range 1 3
+    set regulator-policy-stimulate-demand random-in-range 3 5
+  ]
+
+  reset-ticks
+end
+
+to move-to-empty-one-of [locations]  ;; turtle procedure
+  move-to one-of locations
+  while [any? other turtles-here] [
+    move-to one-of locations
+  ]
+end
+
+to IU-setup ;; Internet User setup
+  set color blue
+  move-to-empty-one-of patches
+  set prefered-AP one-of APs
+  set IU-internet-usage random-normal 1 0.2
+  set IU-budget random-normal 40 10
+  set contracted-ISP "none"
+  set patience random-in-range 1 3
+  set IU-congestion-tolerance random-normal 1 0.15
+  set IU-mintech-req 1
+  set IU-profile random-in-range 1 3
+ end
+
+to AP-setup ;; Application Provider setup
+  set color green
+  move-to-empty-one-of patches
+  set portfolio-quality random-normal 2 0.5
+  set portfolio-variety random-normal 2 0.5
+  set portfolio-mintech-req random-normal 1 0.05
+  set portfolio-congestion-cost random-normal 1 0.05
+  set AP-target-market-share random-normal ( IU-initial-population * 0.8 / ( AP-initial-population ) ) ( 0.1 * ( IU-initial-population / AP-initial-population ) )
+ end
+
+to AP-setup-2 ;; Application Provider setup
+  set color green
+  move-to-empty-one-of patches
+  set portfolio-quality random-normal ( mean [ portfolio-quality ] of APs + 0.5 ) 0.05
+  set portfolio-variety random-normal 2 0.5
+  set portfolio-mintech-req random-normal 1 0.05
+  set portfolio-congestion-cost random-normal 1 0.05
+  set AP-target-market-share random-normal ( IU-initial-population * 0.8 / ( AP-initial-population ) ) ( 0.1 * ( IU-initial-population / AP-initial-population ) )
+ end
+
+to ISP-setup ;; Internet Service Provider setup
+  set color white
+  move-to-empty-one-of patches
+  set infrastructure-quality random-normal 1 0.05
+  set infrastructure-size random-normal ( ( IU-initial-population / ISP-initial-population ) / 2 )  20
+  set infrastructure-cost random-normal 1 0.05
+  set ISP-access-price random-normal 30 2.5
+  set ISP-utilization-price 0
+  set ISP-mg-cost random-normal 15 2.5
+  set contracted-ICT one-of ICTs
+  set patience random-in-range 5 15
+  ifelse random-in-range 0 1 = 0 [ set ISP-strategy "increase quality" ] [ set ISP-strategy "decrease cost" ]
+  ifelse random-in-range 0 1 = 0 [ set ISP-accepted-congestion random-normal 0.85 0.05 ] [ set ISP-accepted-congestion random-normal 1.1 0.05 ]
+  set ISP-return-investment-time 0
+  set ISP-target-sales random-normal ( IU-initial-population * 0.8 / ( ISP-initial-population ) ) ( 0.1 * ( IU-initial-population / ISP-initial-population ) )
+  set ISP-markup random-normal 1.05 0.025
+ end
+
+to ICT-setup ;; Hardware firm setup
+  set color red
+  move-to-empty-one-of patches
+  set bt-costmodifier 100
+  set bt-quality random-normal 1 0.025
+  set bt-cost random-normal 1 0.025
+  set ICT-making-R&D-investment false
+  set ICT-target-clients 1
+  set ICT-total-investment-growth 0
+  set ICT-return-investment-time 0
+end
+
+to ICT-setup-2 ;; Hardware firm setup
+  set color red
+  move-to-empty-one-of patches
+  set bt-costmodifier 100
+  set bt-quality random-normal ( mean [ bt-quality ] of ICTs ) 0.1
+  set bt-cost random-normal ( mean [ bt-cost ] of ICTs ) 0.01
+  set ICT-making-R&D-investment false
+  set ICT-target-clients 1
+  set ICT-total-investment-growth 0
+  set ICT-return-investment-time 0
+end
+
+;;
+;; Reporters
+;;
+to-report mean-congestion
+  report mean [ ISP-congestion ] of ISPs
+end
+
+to-report mean-ISP-access-price
+  report mean [ ISP-access-price ] of ISPs
+end
+
+to-report mean-ISP-utilization-price
+  report mean [ ISP-utilization-price ] of ISPs
+end
+
+to-report mean-ISP-mg-cost
+  report mean [ ISP-marginal-cost ] of ISPs
+end
+
+to-report ISP-coverage  ;; reports % of internet users that are purchasing access
+  let temp 0
+  ask IUs [
+    if contracted-ISP = "none" [ set temp ( temp + 1 ) ]
+  ]
+  report ( ( ( count IUs ) - temp ) / ( count IUs ) ) * 100
+end
+
+to-report ISP-infrastructure-quality
+  report mean [  infrastructure-quality ] of ISPs
+end
+
+to-report ISP-infrastructure-size
+  report mean [ infrastructure-size ] of ISPs
+end
+
+to-report AP-population
+  report count APs
+end
+
+to-report AP-average-quality
+  report mean [ portfolio-quality ] of  APs
+end
+
+to-report AP-average-variety
+  report mean [ portfolio-variety ] of  APs
+end
+
+to-report min-ICT-tech
+  report [ bt-quality ] of min-one-of ICTs [ bt-quality ]
+end
+
+to-report max-ICT-tech
+  report [ bt-quality ] of max-one-of ICTs [ bt-quality ]
+end
+
+to-report mean-ICT-tech
+  report mean [ bt-quality ] of ICTs
+end
+
+to-report ICT-tech-cost
+  report mean [ bt-cost ] of ICTs * mean [ bt-quality ] of ICTs
+end
+
+
+;;
+;; Internet user procedures
+;;
+
+to-report IU-access-utility [ desired-ISP desired-IU ]  ;;     ;; return IU utility from ISP
+  let utility 0
+  let congestion-tolerance [ IU-congestion-tolerance ] of desired-IU
+  let internet-usage [ IU-internet-usage ] of desired-IU
+  let user-profile [ IU-profile ] of desired-IU
+  let budget ( [ IU-budget ] of desired-IU ) * ( 0.85 + ( regulator-policy-stimulate-demand * 0.05 ) )
+  let min-tech [ IU-mintech-req ] of desired-IU
+  ifelse desired-ISP = "none" [ set utility 0 ]
+  [
+    let asking-price ( [ ISP-access-price ] of desired-ISP ) + ( [ ISP-utilization-price ] of desired-ISP ) * ( internet-usage * ( 0.7 - ( regulator-policy-stimulate-demand * 0.1 ) ) )
+    let congestion [ ISP-congestion ] of desired-ISP
+    ask desired-ISP [ set budget budget * ( ( ( [ infrastructure-quality ] of desired-ISP - 1 ) / ( 8 - ( 2 * user-profile ) ) ) + 1 ) ]
+
+    ifelse budget >= asking-price [
+      ask desired-ISP [
+        ifelse congestion-tolerance >= congestion or min-tech <=  infrastructure-quality [
+          ifelse congestion-tolerance >= congestion and min-tech <= infrastructure-quality
+          [ set utility 1 ] [ set utility random-normal ( 0.2 + ( ( user-profile - 1) / 10 ) ) 0.5 ]
+        ]
+        [
+          ifelse congestion-tolerance < congestion and min-tech > infrastructure-quality
+          [ set utility -1 ] [ set utility random-normal ( 0 - ( ( user-profile - 1) / 10 ) ) 0.5 ]
+        ]
+      ]
+    ]
+    [ set utility -1 ]
+  ]
+
+  report utility
+end
+
+
+to IU-procedure          ;; ask IUs to defines from which ISP to purchase Internet access
+  set-profile
+
+  if IU-access-utility contracted-ISP self <= 0 [
+    set patience patience + 1
+    chose-ISP
+    ifelse IU-access-utility contracted-ISP self < 0 [ ;; If the IU gets negative utility for more than 3 turns, he runs out of patience and does not purchase access
+      if  patience > 3 [ set contracted-ISP "none" ]
+    ]
+    [ set patience 0 ]
+  ]
+
+  ;;let old-AP prefered-AP
+  chose-AP
+
+  ask my-links [ die ]
+
+  ;;ifelse prefered-AP = old-AP [ create-link-with prefered-AP ] [ ask my-links with [ member? other-end APs ] [ die ] ]
+  create-link-with prefered-AP
+  ask my-links with [member? other-end APs] [ set color red ]
+
+  ifelse contracted-ISP != "none" [ create-link-with contracted-ISP ] [ ask my-links with [ member? other-end ISPs ] [ die ] ]
+  ask my-links with [member? other-end ISPs] [ set color green ]
+end
+
+to set-profile
+  if IU-profile = 1 [
+    set IU-mintech-req  min-infrastructure-quality ]
+  if IU-profile = 2 [ set IU-mintech-req  ISP-infrastructure-quality ]
+  if IU-profile = 3 [ set IU-mintech-req ISP-infrastructure-quality * 1.1 ]
+end
+
+to chose-ISP ;; chose another ISP to contract access ( has a chance to stick with current ISP, but the chance is smaller the better the rivals offers)
+  let new-ISP contracted-ISP
+  let desired-IU self
+  ask ISPs [
+    if IU-access-utility self desired-IU > 0 [
+      if random-in-range 0 2 = 0 [ set new-ISP self ]
+    ]
+  ]
+  set contracted-ISP new-ISP
+end
+
+to chose-AP ;; IU have higher chance to use APs with larger users base (network effect) and/or with better quality
+  let new-AP prefered-AP
+  let min-tech IU-mintech-req
+  ask APs [
+    if AP-average-quality > portfolio-quality [
+      if random-in-range 0 100 < 50 [
+        ;;if ( member? desired-segment segment = true ) and ( portfolio-quality > AP-average-quality desired-segment ) [
+          set new-AP self
+          set min-tech portfolio-mintech-req
+        ;;]
+      ]
+    ]
+  ]
+
+  set prefered-AP new-AP
+  set IU-mintech-req min-tech
+end
+
+;;
+;; Internet Service Provider procedures
+;;
+
+to calculate-ISP-congestion  ;; return ISP congestion (total consumers * usage level ) / infrastructure-size
+  let temp 0
+  let me self
+  ask IUs [
+    if contracted-ISP = me [ set temp temp + ( ( IU-internet-usage * ( ( ( IU-profile - 1 ) / 10 ) + 1 ) * [ infrastructure-quality ] of contracted-ISP ) * ( 0.7 + ( regulator-policy-stimulate-demand * 0.1 ) ) ) ]
+  ]
+  set ISP-congestion ( ( temp / infrastructure-size ) * ( 1 + ( regulator-policy-coinvestment * 0.02 ) ) )
+end
+
+to-report ISP-average-investment-growth
+  report ISP-total-investment-growth / ticks
+end
+
+to-report min-infrastructure-quality
+  report [ infrastructure-quality ] of min-one-of ISPs [ infrastructure-quality ]
+end
+
+to-report max-infrastructure-quality
+  report [ infrastructure-quality ] of max-one-of ISPs [ infrastructure-quality ]
+end
+
+to-report min-infrastructure-size
+  report [ infrastructure-size ] of min-one-of ISPs [ infrastructure-size ]
+end
+
+to-report max-infrastructure-size
+  report [ infrastructure-size ] of max-one-of ISPs [ infrastructure-size ]
+end
+
+to-report min-ISP-access-price
+  report [ ISP-access-price ] of min-one-of ISPs [ ISP-access-price ]
+end
+
+to-report max-ISP-access-price
+  report [ ISP-access-price ] of max-one-of ISPs [ ISP-access-price ]
+end
+
+to-report min-ISP-utilization-price
+  report [ ISP-utilization-price ] of min-one-of ISPs [ ISP-utilization-price ]
+end
+
+to-report max-ISP-utilization-price
+  report [ ISP-utilization-price ] of max-one-of ISPs [ ISP-utilization-price ]
+end
+
+to ISP-investment     ;; defines ISP investment (maybe inside ISP-procedure)
+  ifelse infrastructure-quality < best-ICT-tech-available * ( 0.3 + ( regulator-policy-min-quality * 0.06 ) ) [ ISP-new-tech-investment ]  ;; ISPs nunca tem tecnologia 30% inferior a pior do mercado, e regulador exige no máximo 80% inferior ao melhor
+  [
+    if ISP-strategic-behavior = "expand" [ ISP-expand-investment ]
+    if ISP-strategic-behavior = "new tech" [ ISP-new-tech-investment ]
+    if ISP-strategic-behavior = "decrease price" [ ISP-define-price ]
+  ]
+end
+
+to ISP-define-strategic-behavior
+  ifelse ISP-good-sales? = false [
+    ifelse patience > 15 [ set patience patience - 5 ] [ set patience patience - 1 ]
+    ifelse ISP-can-decrease-prices? = true [ set ISP-strategic-behavior "decrease price" ] [ ISP-investment-strategy ]
+  ]
+  [
+    set ISP-strategic-behavior "do nothing"
+    set patience patience + 1
+  ]
+
+  if patience <= 0 [
+    change-ISP-strategy
+    set patience random-in-range 5 15
+  ]
+end
+
+to ISP-investment-strategy
+  ifelse ISP-can-make-investment? = true [
+    ifelse ISP-is-network-congested? = true [ set ISP-strategic-behavior "expand" ] [ set ISP-strategic-behavior "new tech" ]
+  ] [ set ISP-strategic-behavior "do nothing" ]
+end
+
+to-report ISP-good-sales? ;;; report true if number of clients is above minimum desired
+  let temp 0
+  let temp-ISP self
+  ask IUs [
+    if contracted-ISP = temp-ISP [ set temp temp + 1 ]
+  ]
+  ifelse temp >= ISP-target-sales [ report true ] [ report false ]
+end
+
+to-report ISP-can-decrease-prices?
+  ifelse ISP-access-price > ISP-marginal-cost [ report true ] [report false ]
+end
+
+to-report ISP-can-make-investment?
+  ifelse  ISP-return-investment-time <= 0 [ report true ] [ report false ]
+end
+
+to-report ISP-marginal-cost
+  ifelse infrastructure-cost > 1 [ report ISP-mg-cost * ( 1 + ( ( infrastructure-cost - 1 ) / 2) ) ] [ report ISP-mg-cost ]
+end
+
+to-report ISP-is-network-congested?
+  ifelse ISP-congestion > 1.3 - ( 0.1 * regulator-policy-min-congestion ) [ report true ]
+  [ ifelse ISP-congestion > ISP-accepted-congestion [ report true ] [ report false ] ]
+end
+
+to ISP-expand-investment  ;; expands infrastructure size and increase marginal costs
+  if random-in-range 0 100 < ( ( 10 * regulator-policy-coinvestment ) + 30 ) [
+    set infrastructure-size infrastructure-size * ( 1 + ( infrastructure-quality / 20 ) )
+    set ISP-return-investment-time 15 * ( 1.75 - ( regulator-policy-incentivize-ISP * 0.25 ) )
+  ]
+end
+
+to change-ISP-strategy
+  if ISP-strategy = "increase quality" [
+    set ISP-strategy "decrease cost"
+    set ISP-target-sales random-normal ( IU-initial-population * 0.9 / ( ISP-initial-population ) ) ( 0.5 * ( IU-initial-population / ISP-initial-population ) )
+    set ISP-markup 1
+  ]
+  if ISP-strategy = "decrease cost" [
+    set ISP-strategy "increase quality"
+    set ISP-target-sales random-normal ( IU-initial-population * 0.9 / ( ISP-initial-population ) ) ( 0.5 * ( IU-initial-population / ISP-initial-population ) )
+    set ISP-markup random-normal 1.12 0.015
+  ]
+end
+
+to ISP-new-tech-investment ;; implement new technology, keep infrastructure size and (may) increase marginal (ISP is loyal to original ICT, but has a chance of changing ICT depending on their propensity to risk)
+  if ISP-strategy = "increase quality" [ ;; tem 30% de escolher a melhor ICT se a qualidade dessa ICT for melhor que a atual, compra tecnologia dela
+    ifelse random-in-range 0 100 < 30 [ set contracted-ICT who-best-infrastructure-quality ] [ set contracted-ICT one-of ICTs ]
+
+    if [ bt-quality ] of contracted-ICT > infrastructure-quality [
+      set infrastructure-quality [ bt-quality ] of contracted-ICT
+      set infrastructure-cost ( [ bt-cost ] of contracted-ICT * [ bt-quality ] of contracted-ICT )
+    ]
+
+    set ISP-return-investment-time 30 * ( 1.75 - ( regulator-policy-incentivize-ISP * 0.25 ) )
+  ]
+  if ISP-strategy = "decrease cost" [ ;; tem 30% de chance de escolher a melhor ICT, se o preço for menor que a atual tecnologia e a qualidade não for tão ruim, implementa a tecnologia dela.
+    ifelse random-in-range 0 100 < 30 [ set contracted-ICT who-min-infrastructure-price ] [ set contracted-ICT one-of ICTs ]
+
+    if [ bt-quality ] of contracted-ICT > infrastructure-quality [ set infrastructure-quality [ bt-quality ] of contracted-ICT ]
+    if ( [ bt-cost ] of contracted-ICT * [ bt-quality ] of contracted-ICT ) < infrastructure-cost and infrastructure-quality < best-ICT-tech-available * ( 0.3 + ( regulator-policy-min-quality * 0.06 ) ) [
+      set infrastructure-quality [ bt-quality ] of contracted-ICT
+      set infrastructure-cost ( [ bt-cost ] of contracted-ICT * [ bt-quality ] of contracted-ICT )
+    ]
+
+    set ISP-return-investment-time 20 * ( 1.75 - ( regulator-policy-incentivize-ISP * 0.25 ) )
+  ]
+end
+
+
+to ISP-define-price
+  ask ISPs [
+    ifelse ISP-good-sales? = true [ ISP-change-price 5 ISP-markup ] [ ISP-change-price -5 1 ]
+  ]
+end
+
+to ISP-procedure           ;; ask ISPs procedure to collect profits, define investments and set products
+  calculate-ISP-congestion
+  ISP-define-strategic-behavior
+  ISP-investment
+  if patience > 4 and ISP-access-price < 1.4 * ISP-marginal-cost [ ISP-define-price ]
+
+  set ISP-return-investment-time ISP-return-investment-time - 1
+
+  if ISP-access-price < ISP-marginal-cost [ set ISP-access-price ISP-marginal-cost ]
+  if ISP-access-price > ( mean [ ISP-marginal-cost ] of ISPs ) * ( 1.45 - ( regulator-policy-transparency * 0.05 ) )  [ set ISP-access-price ( mean [ ISP-marginal-cost ] of ISPs ) * ( 1.45 - ( regulator-policy-transparency * 0.05 ) ) ]
+  if ( ISP-utilization-price / ( ISP-access-price + ISP-utilization-price ) ) > ( regulator-policy-assymetric-regulation - 1 ) * 0.075 [ set ISP-utilization-price ( ( regulator-policy-assymetric-regulation - 1 ) * 0.075 ) * ( ISP-access-price + ISP-utilization-price ) ]
+
+  ask my-links [ die ]
+
+  create-link-with contracted-ICT
+  ask my-links with [member? other-end ICTs] [ set color yellow ]
+end
+
+;;
+;; Application Provider procedures
+;;
+
+
+to-report AP-average-investment-growth
+  report AP-total-investment-growth / ticks
+end
+
+to-report increase-variety?
+  ifelse portfolio-variety < max-portfolio-variety * min-infrastructure-quality [ report true ] [report false ]
+end
+
+
+to AP-investment     ;; defines AP investment
+  if AP-strategic-behavior = "horizontal" [ AP-horizontal-investment ]
+  if AP-strategic-behavior = "vertical" [ AP-vertical-investment ]
+end
+
+
+to AP-R&D
+  ifelse increase-quality-is-costly? = true [
+    ifelse increase-variety? = true [ set AP-strategic-behavior "horizontal" ]
+    [ set AP-strategic-behavior "vertical" ]
+  ] [ set AP-strategic-behavior "vertical" ]
+
+end
+
+
+to-report increase-quality-is-costly?  ;;; PRECISA DEFINIR
+  ifelse portfolio-mintech-req < 0.9 * min-infrastructure-quality [
+    ifelse random-in-range 0 100 < 80 [ report false ] [ report true ]
+  ] [
+    ifelse random-in-range 0 100 < 80 [ report true ] [ report false ]
+  ]
+end
+
+to AP-horizontal-investment  ;;
+  let portfolio-modifier random-normal 1.2 0.05
+  ;;if random-in-range 0 100 < ( ( portfolio-variety / ( max-portfolio-variety * min-infrastructure-quality ) ) * 100 ) [
+  ;;  set portfolio-modifier 1
+  ;;]
+
+  let portfolio-mintech-modifier random-normal 1.01 0.0025
+  let portfolio-congestion-modifier random-normal 1.01 0.0025
+
+  if portfolio-mintech-modifier * portfolio-mintech-req <= min-infrastructure-quality [
+    set portfolio-variety ( portfolio-variety * portfolio-modifier )
+    set portfolio-mintech-req ( portfolio-mintech-req * portfolio-mintech-modifier )
+    set portfolio-congestion-cost ( portfolio-congestion-cost * portfolio-congestion-modifier )
+  ]
+end
+
+to AP-vertical-investment
+  let portfolio-modifier random-normal ( 1.10 - ( portfolio-variety / 100 ) )  0.01
+  let max-quality [ portfolio-quality ] of max-one-of APs [ portfolio-quality ]
+  if portfolio-modifier < 1 [ set portfolio-modifier 1 ]
+  if max-quality - portfolio-quality > 5 [ set portfolio-modifier 1.15 ]
+
+  if min-infrastructure-quality > 1 [ set portfolio-modifier portfolio-modifier * min-infrastructure-quality ]
+  let portfolio-mintech-modifier random-normal 1.05 0.01
+  let portfolio-congestion-modifier random-normal 1.05 0.01
+
+  if portfolio-mintech-modifier * portfolio-mintech-req <= min-infrastructure-quality [
+    set portfolio-quality ( portfolio-quality * portfolio-modifier )
+    set portfolio-mintech-req ( portfolio-mintech-req * portfolio-mintech-modifier )
+    set portfolio-congestion-cost ( portfolio-congestion-cost * portfolio-congestion-modifier )
+  ]
+end
+
+to AP-procedure         ;; ask APs procedure to collect profits, define investments and set products
+  set AP-clients count my-out-links with [ color = red ]
+  if ticks mod 50 = 49 [
+    if count APs > 2 [ if AP-clients = 0 [ die ] ]
+  ]
+
+  AP-R&D
+  AP-investment
+
+  if portfolio-quality > max-portfolio-quality * min-infrastructure-quality [ set portfolio-quality max-portfolio-quality * min-infrastructure-quality ]
+  if portfolio-variety > max-portfolio-variety * min-infrastructure-quality [ set portfolio-variety max-portfolio-variety * min-infrastructure-quality ]
+end
+
+;;
+;; ICT FIrm procedures
+;;
+
+
+to-report ICT-good-sales? ;;; report true if number of clients is above minimum desired
+  let temp 0
+  let temp-ICT self
+  ask ISPs [
+    if contracted-ICT = temp-ICT [ set temp temp + 1 ]
+  ]
+  ifelse temp >= ICT-target-clients [ report true ] [ report false ]
+end
+
+to-report ICT-average-investment-growth
+  let temp 0
+  ask ICTs [ set temp temp + ICT-investment-growth ]
+  report temp / count ICTs
+end
+
+to-report who-min-infrastructure-price
+  let min-price [ ICT-asking-price ] of min-one-of ICTs [ ICT-asking-price ]
+  report one-of ICTs with [ ICT-asking-price = min-price ]
+end
+
+to-report who-best-infrastructure-quality
+  let best-quality [ bt-quality ] of max-one-of ICTs [ bt-quality ]
+  report one-of ICTs with [ bt-quality = best-quality ]
+end
+
+to-report best-ICT-tech-available
+  let best-quality [ bt-quality ] of max-one-of ICTs [ bt-quality ]
+  report best-quality
+end
+
+to-report ICT-make-R&D-investment?
+  ifelse ICT-return-investment-time > 0 [ report false ] [
+    report true
+    set ICT-making-R&D-investment false
+  ]
+end
+
+to ICT-decreasecost
+  ifelse ( [ bt-quality] of who-best-infrastructure-quality ) - bt-quality > 1.5 [ ICT-newlinktech ]
+  [
+    let temp random-normal -0.01 0.01
+    if temp < 0 [ set bt-cost bt-cost * ( 1 + temp ) ]
+    set ICT-investment-growth random-normal 1.05 0.01
+    set ICT-return-investment-time ( random-in-range 9 12 ) * ( 1.6 - ( regulator-policy-Incentivize-ICT * 0.2 ) )
+    set ICT-making-R&D-investment true
+    set innovation-counter innovation-counter + 1
+  ]
+end
+
+to ICT-newlinktech
+  let new-tech-quality random-normal 1.4 0.1
+  let new-tech-cost random-normal 1.8 0.2
+  ifelse ( bt-quality * new-tech-quality / bt-cost * new-tech-cost ) > ( bt-quality / bt-cost ) and new-tech-quality > bt-quality [ ;; If new tech quality/cost is better than old tech, change tech
+    set bt-quality bt-quality * new-tech-quality
+    set bt-cost bt-cost * new-tech-cost
+    set ICT-investment-growth random-normal 1.12 0.02
+    set ICT-return-investment-time ( random-in-range 18 24 ) * ( 1.6 - ( regulator-policy-Incentivize-ICT * 0.2 ) )
+    set ICT-making-R&D-investment true
+    set innovation-counter innovation-counter + 1
+  ] [
+    set ICT-investment-growth random-normal 1.05 0.01
+    set ICT-return-investment-time ( random-in-range 9 12 ) * ( 1.6 - ( regulator-policy-Incentivize-ICT * 0.2 ) )
+    set ICT-making-R&D-investment true
+    set innovation-counter innovation-counter + 1
+  ]
+end
+
+to ICT-investment
+  ifelse ICT-make-R&D-investment? = true [
+    ifelse bt-quality < best-ICT-tech-available * ( 0.3 + ( regulator-policy-min-quality * 0.04 ) ) [ ICT-newlinktech ]
+    [
+      ifelse bt-cost > 1 [ ICT-decreasecost ] [
+        ifelse bt-cost > 0.4 [ ifelse random-in-range 1 3 != 3 [ ICT-decreasecost ] [ ICT-newlinktech ] ]
+        [ ICT-newlinktech ]
+      ]
+    ]
+  ] [ if ICT-making-R&D-investment = false [ set ICT-investment-growth random-normal 0.99 0.01 ] ]
+end
+
+to ICT-procedure         ;; ask ICTs procedure to collect profits, define investments and set products
+  ICT-investment
+  ICT-define-price
+  ;; set ICT-total-investment-growth ICT-total-investment-growth + ICT-investment-growth
+  set ICT-return-investment-time ( ICT-return-investment-time - 1 )
+
+  if bt-quality < 0.9 [ die ]
+end
+
+to ICT-define-price
+  ifelse ICT-good-sales? = true [ ICT-change-price 2.5 ] [ ICT-change-price -2.5 ]
+  if ICT-asking-price < bt-cost [ set ICT-asking-price bt-cost ]
+end
+
+;;
+;; Runtime Procedures
+;;
+
+to run-economy
+  ask ICTs [ ICT-procedure ]
+  ask IUs [ IU-procedure ]
+  ask APs [ AP-procedure ]
+  ask ISPS [ ISP-procedure ]
+
+  if AP-population < 3 [ if random-in-range 0 10 < 6 [ create-APs 1 [ AP-setup-2 ] ] ]
+
+  set innovation-index ( ( mean [ infrastructure-quality  ] of ISPs ) / ( max-ICT-tech * 0.9 ) ) * 100 ;; taxa de adoção da melhor tecnologia de ICT possível
+  if innovation-index > 100 [ set innovation-index 100 ]
+
+  set economic-efficiency-index sector-efficiency
+
+  set universal-access-index ISP-coverage
+
+  set avg-ICT-investment ICT-average-investment-growth
+  set avg-AP-quality AP-average-quality
+  set avg-AP-variety AP-average-variety
+
+end
+
+to-report sector-efficiency
+
+  ifelse ( mean [ ISP-access-price ] of ISPs ) >= ( mean [ ISP-marginal-cost ] of ISPs ) and ( mean [ ISP-access-price ] of ISPs ) < 1.4 * ( mean [ ISP-marginal-cost ] of ISPs ) [
+    report ( ( ( ( 1.4 * mean [ ISP-marginal-cost ] of ISPs ) / ( mean [ ISP-access-price ] of ISPs ) ) - 1 ) * 180 ) + 32
+  ]
+  [ report 25 ]
+
+end
+
+to-report EC-index
+  report ( EC-economic-efficiency * economic-efficiency-index ) + ( EC-universal-access * universal-access-index ) + ( EC-innovation + innovation-index )
+end
+
+to regulator-action    ;; if EC-index < satisfatory -> change rule randomly
+
+  if EC-index < 360 [
+    ifelse EC-index < 240 [
+      let temp random-in-range 0 100
+      if temp <= 20 [ change-policies ]
+    ] [
+      let temp random-in-range 0 100
+      if temp <= 5 [ change-policies ]
+    ]
+  ]
+
+  regulator-incentives-check
+
+   if ( random-normal 1 0.1 ) < 0.75 + ( 0.01 * regulator-policy-transparency ) [ ;; idealmente ess chance base (5) deveria estar relacionada há algum indicador de desempenho
+    ifelse random-in-range 0 10 < 8 [ create-APs 1 [ AP-setup-2 ] ] [ create-ICTs 1 [ ICT-setup-2 ] ]
+  ]
+
+  ;;; regulator-policy-coinvestment -> The higher, the greater % of the infrastructure can be shares (cheaper investment, but higher congestion)
+
+  ;;; regulator-policy-assymetric-regulation -> the higher the assymetric regulation, the higher percentage of the price can be allocated in utilization price (access price = mg cost)
+
+  ;;; regulator-policy-min-quality -> the higher the min quality required, the closer to the best ICT tech available the ISP must offer
+
+  ;;; regulator-policy-min-congestion -> the higher the regulator policy, the lower will be the minimum congestion allowed (ranging from 120% of avg utilization to 80%)
+
+  ;;; regulator-policy-transparency -> the higher the policy, the easier it is for APs to enter the market and the harder it is for the ISP to charge a high markup
+
+  ;;; regulator-policy-incentivize-ISP -> the higher the incentive, the the higher will be the modifier to return investiment time (ranging from 140% to 60%)
+
+  ;;; regulator-policy-Incentivize-ICT -> the higher the incentive, the the higher will be the modifier to return investiment time (ranging from 140% to 60%)
+
+  ;;; regulator-policy-stimulate-demand -> the higher the incentive, the the higher will be the modifier to IU budget and Internet usage (ranging from 120% to 80%)
+
+end
+
+to change-policies
+  let chance random-in-range 0 100
+
+  if regulator-profile = "innovation + efficiency" [
+    ifelse chance < 80 [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-min-quality ( regulator-policy-min-quality + 1 ) ]
+        [ set regulator-policy-min-quality ( regulator-policy-min-quality - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-transparency ( regulator-policy-transparency + 1 ) ]
+        [ set regulator-policy-transparency ( regulator-policy-transparency - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT + 1 ) ]
+        [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+      ]
+    ] [
+      let chosen-policy random-in-range 1 5
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-coinvestment ( regulator-policy-coinvestment + 1 ) ]
+        [ set regulator-policy-coinvestment ( regulator-policy-coinvestment - 1 ) ]
+      ]
+
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation + 1 ) ]
+        [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation - 1 ) ]
+      ]
+
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-min-congestion ( regulator-policy-min-congestion + 1 ) ]
+        [ set regulator-policy-min-congestion ( regulator-policy-min-congestion - 1 ) ]
+      ]
+
+      if chosen-policy = 4 [
+        ifelse temp = 1 [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP + 1 ) ]
+        [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP - 1 ) ]
+      ]
+
+      if chosen-policy = 5 [
+        ifelse temp = 1 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand + 1 ) ]
+        [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+      ]
+    ]
+  ]
+
+  if regulator-profile = "innovation + access" [
+    if chance < 45 [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-coinvestment ( regulator-policy-coinvestment + 1 ) ]
+        [ set regulator-policy-coinvestment ( regulator-policy-coinvestment - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT + 1 ) ]
+        [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+      ]
+    ]
+    ifelse chance >= 45 and chance < 80 [
+      let chosen-policy random-in-range 1 4
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set  regulator-policy-coinvestment (  regulator-policy-coinvestment + 1 ) ]
+        [ set  regulator-policy-coinvestment (  regulator-policy-coinvestment - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation + 1 ) ]
+        [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-min-congestion ( regulator-policy-min-congestion + 1 ) ]
+        [ set regulator-policy-min-congestion ( regulator-policy-min-congestion - 1 ) ]
+      ]
+      if chosen-policy = 4 [
+        ifelse temp = 1 [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP + 1 ) ]
+        [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP - 1 ) ]
+      ]
+    ] [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-transparency ( regulator-policy-transparency + 1 ) ]
+        [ set regulator-policy-transparency ( regulator-policy-transparency - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand + 1 ) ]
+        [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+      ]
+    ]
+  ]
+
+  if regulator-profile = "access + innovation" [
+    if chance < 45 [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-coinvestment ( regulator-policy-coinvestment + 1 ) ]
+        [ set regulator-policy-coinvestment ( regulator-policy-coinvestment - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation + 1 ) ]
+        [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP + 1 ) ]
+        [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP - 1 ) ]
+      ]
+    ]
+    ifelse chance >= 45 and chance < 80 [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-min-quality ( regulator-policy-min-quality + 1 ) ]
+        [ set regulator-policy-min-quality ( regulator-policy-min-quality - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT + 1 ) ]
+        [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand + 1 ) ]
+        [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+      ]
+    ] [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-min-congestion ( regulator-policy-min-congestion + 1 ) ]
+        [ set regulator-policy-min-congestion ( regulator-policy-min-congestion - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-transparency ( regulator-policy-transparency + 1 ) ]
+        [ set regulator-policy-transparency ( regulator-policy-transparency - 1 ) ]
+      ]
+    ]
+  ]
+
+  if regulator-profile = "access + efficiency" [
+    if chance < 45 [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-coinvestment ( regulator-policy-coinvestment + 1 ) ]
+        [ set regulator-policy-coinvestment ( regulator-policy-coinvestment - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand + 1 ) ]
+        [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+      ]
+    ]
+    ifelse chance >= 45 and chance < 80 [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation + 1 ) ]
+        [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-transparency ( regulator-policy-transparency + 1 ) ]
+        [ set regulator-policy-transparency ( regulator-policy-transparency - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP + 1 ) ]
+        [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP - 1 ) ]
+      ]
+    ] [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-min-quality ( regulator-policy-min-quality + 1 ) ]
+        [ set regulator-policy-min-quality ( regulator-policy-min-quality - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-min-congestion ( regulator-policy-min-congestion + 1 ) ]
+        [ set regulator-policy-min-congestion ( regulator-policy-min-congestion - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT + 1 ) ]
+        [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+      ]
+    ]
+  ]
+
+  if regulator-profile = "efficiency + access" [
+    if chance < 45 [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-transparency ( regulator-policy-transparency + 1 ) ]
+        [ set regulator-policy-transparency ( regulator-policy-transparency - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand + 1 ) ]
+        [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+      ]
+    ]
+    ifelse chance >= 45 and chance < 80 [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-coinvestment ( regulator-policy-coinvestment + 1 ) ]
+        [ set regulator-policy-coinvestment ( regulator-policy-coinvestment - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation + 1 ) ]
+        [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP + 1 ) ]
+        [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP - 1 ) ]
+      ]
+    ] [
+      let chosen-policy random-in-range 1 3
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-min-quality ( regulator-policy-min-quality + 1 ) ]
+        [ set regulator-policy-min-quality ( regulator-policy-min-quality - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-min-congestion ( regulator-policy-min-congestion + 1 ) ]
+        [ set regulator-policy-min-congestion ( regulator-policy-min-congestion - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT + 1 ) ]
+        [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+      ]
+    ]
+  ]
+
+  if regulator-profile = "efficiency + innovation" [
+    if chance < 45 [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-transparency ( regulator-policy-transparency + 1 ) ]
+        [ set regulator-policy-transparency ( regulator-policy-transparency - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand + 1 ) ]
+        [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+      ]
+    ]
+    ifelse chance >= 45 and chance < 80 [
+      let chosen-policy random-in-range 1 2
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation + 1 ) ]
+        [ set regulator-policy-assymetric-regulation ( regulator-policy-assymetric-regulation - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+
+        ifelse temp = 1 [ set regulator-policy-min-quality ( regulator-policy-min-quality + 1 ) ]
+        [ set regulator-policy-min-quality ( regulator-policy-min-quality - 1 ) ]
+      ]
+    ] [
+      let chosen-policy random-in-range 1 4
+      let temp random-in-range 1 2
+
+      if chosen-policy = 1 [
+        ifelse temp = 1 [ set regulator-policy-coinvestment ( regulator-policy-coinvestment + 1 ) ]
+        [ set regulator-policy-coinvestment ( regulator-policy-coinvestment - 1 ) ]
+      ]
+      if chosen-policy = 2 [
+        ifelse temp = 1 [ set regulator-policy-min-congestion ( regulator-policy-min-congestion + 1 ) ]
+        [ set regulator-policy-min-congestion ( regulator-policy-min-congestion - 1 ) ]
+      ]
+      if chosen-policy = 3 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT + 1 ) ]
+        [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+      ]
+      if chosen-policy = 4 [
+        ifelse temp = 1 [ set regulator-policy-Incentivize-ISP( regulator-policy-Incentivize-ISP + 1 ) ]
+        [ set regulator-policy-Incentivize-ISP ( regulator-policy-Incentivize-ISP - 1 ) ]
+      ]
+    ]
+  ]
+
+
+end
+
+to regulator-incentives-check
+
+  ;; check policies over or under regulator limits
+
+  if regulator-policy-coinvestment > 5 [ set regulator-policy-coinvestment 5 ]
+  if regulator-policy-assymetric-regulation > 5 [ set regulator-policy-assymetric-regulation 5 ]
+  if regulator-policy-min-quality > 5 [ set regulator-policy-min-quality 5 ]
+  if regulator-policy-min-congestion > 5 [ set regulator-policy-min-congestion 5 ]
+  if regulator-policy-transparency > 5 [ set regulator-policy-transparency 5 ]
+  if regulator-policy-incentivize-ISP > 5 [set regulator-policy-incentivize-ISP 5 ]
+  if regulator-policy-Incentivize-ICT > 5 [ set regulator-policy-Incentivize-ICT 5 ]
+  if regulator-policy-stimulate-demand > 5 [ set regulator-policy-stimulate-demand 5 ]
+
+  if regulator-policy-coinvestment < 1 [ set regulator-policy-coinvestment 1 ]
+  if regulator-policy-assymetric-regulation < 1 [ set regulator-policy-assymetric-regulation 1 ]
+  if regulator-policy-min-quality < 1 [ set regulator-policy-min-quality 1 ]
+  if regulator-policy-min-congestion < 1 [ set regulator-policy-min-congestion 1 ]
+  if regulator-policy-transparency < 1 [ set regulator-policy-transparency 1 ]
+  if regulator-policy-incentivize-ISP < 1 [ set regulator-policy-incentivize-ISP 1 ]
+  if regulator-policy-Incentivize-ICT < 1 [ set regulator-policy-Incentivize-ICT 1 ]
+  if regulator-policy-stimulate-demand < 1 [ set regulator-policy-stimulate-demand 1 ]
+
+  if count ISPs = 1 [ set regulator-policy-coinvestment 0 ]
+
+  if ( 9 + max-regulator-incentives ) < ( regulator-policy-incentivize-ISP + regulator-policy-Incentivize-ICT + regulator-policy-stimulate-demand ) [
+    let temp random-in-range 1 3
+
+    if temp = 1 [ set regulator-policy-incentivize-ISP ( regulator-policy-incentivize-ISP - 1 ) ]
+    if temp = 2 [ set regulator-policy-Incentivize-ICT ( regulator-policy-Incentivize-ICT - 1 ) ]
+    if temp = 3 [ set regulator-policy-stimulate-demand ( regulator-policy-stimulate-demand - 1 ) ]
+
+    regulator-incentives-check
+  ]
+
+end
+
+to go
+  run-economy  ;; não sei como faço para circular o dinheiro entre os agentes
+  regulator-action  ;; 3 rules (Prioritized Pay, Metered/Usage-Based Billing, and Zero Rating/Sponsored Data) 9 combinations
+  tick
+
+end
+
+
+;;
+;; Utilities
+;;
+
+to ICT-change-price [ change ]
+  let before ICT-asking-price
+  let percent ( 1 + (change / 100) )
+  set ICT-asking-price ( before * percent )
+end
+
+to ISP-change-price [ change markup ]
+  let access-price ISP-access-price
+  let utilization-price ISP-utilization-price
+  let percent markup + (change / 100)
+
+  ifelse  ( utilization-price / ( access-price + utilization-price ) ) < ( regulator-policy-assymetric-regulation - 1 ) * 0.075 [
+    ifelse random-in-range 0 100 < 50 [ set ISP-access-price ( access-price * percent ) ] [
+      ifelse utilization-price <= 0 [
+        set ISP-utilization-price 5 ] [
+        set ISP-utilization-price ( utilization-price * percent ) ]
+    ]
+  ]
+  [ set ISP-access-price ( access-price * percent ) ]
+
+end
+
+to-report random-in-range [low high]
+  report low + random (high - low + 1)
+end
+@#$#@#$#@
+GRAPHICS-WINDOW
+3
+10
+856
+864
+-1
+-1
+13.0
+1
+10
+1
+1
+1
+0
+1
+1
+1
+-32
+32
+-32
+32
+0
+0
+1
+ticks
+30.0
+
+BUTTON
+1067
+31
+1130
+64
+NIL
+setup
+NIL
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+BUTTON
+1067
+68
+1130
+101
+NIL
+go
+T
+1
+T
+OBSERVER
+NIL
+NIL
+NIL
+NIL
+1
+
+SLIDER
+864
+22
+1041
+55
+EC-economic-efficiency
+EC-economic-efficiency
+1
+3
+2.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+864
+63
+1036
+96
+EC-universal-access
+EC-universal-access
+1
+3
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+863
+105
+1035
+138
+EC-innovation
+EC-innovation
+1
+3
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+161
+1034
+194
+IU-initial-population
+IU-initial-population
+100
+2000
+2000.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+199
+1034
+232
+AP-initial-population
+AP-initial-population
+1
+20
+20.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+240
+1034
+273
+ISP-initial-population
+ISP-initial-population
+1
+5
+1.0
+1
+1
+NIL
+HORIZONTAL
+
+SLIDER
+862
+278
+1034
+311
+ICT-initial-population
+ICT-initial-population
+1
+5
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+1194
+10
+1557
+290
+ISP coverage
+NIL
+NIL
+0.0
+100.0
+0.0
+100.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot ISP-coverage"
+
+PLOT
+1126
+336
+1388
+512
+ICT tech cost
+NIL
+NIL
+1.0
+1.2
+1.0
+1.2
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot ICT-tech-cost"
+
+PLOT
+1793
+10
+2019
+187
+Average AP quality
+NIL
+NIL
+1.0
+5.0
+1.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot avg-AP-quality"
+"pen-1" 1.0 0 -955883 true "" "plot avg-AP-variety"
+
+PLOT
+1565
+11
+1783
+186
+ISP Infrastructure quality
+NIL
+NIL
+0.95
+2.0
+0.95
+2.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -13345367 true "" "plot min-infrastructure-quality"
+"pen-1" 1.0 0 -16777216 true "" "plot max-infrastructure-quality"
+
+PLOT
+1567
+195
+2016
+331
+ISP Asking Price
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -11085214 true "" "plot mean-ISP-mg-cost"
+"pen-1" 1.0 0 -5298144 true "" "plot mean-ISP-utilization-price"
+"pen-2" 1.0 0 -14070903 true "" "plot mean-ISP-access-price"
+
+PLOT
+1396
+334
+1703
+569
+ICT technology quality
+NIL
+NIL
+1.0
+2.0
+1.0
+2.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot min-ICT-tech"
+"pen-1" 1.0 0 -3844592 true "" "plot max-ICT-tech"
+"pen-2" 1.0 0 -7500403 true "" "plot mean-ICT-tech"
+
+SLIDER
+1037
+108
+1186
+141
+max-regulator-incentives
+max-regulator-incentives
+0
+6
+3.0
+1
+1
+NIL
+HORIZONTAL
+
+PLOT
+1244
+577
+2008
+785
+Regulator policies
+NIL
+NIL
+0.0
+5.0
+1.0
+5.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot regulator-policy-coinvestment"
+"pen-1" 1.0 0 -7500403 true "" "plot regulator-policy-assymetric-regulation"
+"pen-2" 1.0 0 -2674135 true "" "plot regulator-policy-min-quality"
+"pen-3" 1.0 0 -955883 true "" "plot regulator-policy-min-congestion"
+"pen-4" 1.0 0 -6459832 true "" "plot regulator-policy-transparency"
+"pen-5" 1.0 0 -1184463 true "" "plot regulator-policy-incentivize-ISP"
+"pen-6" 1.0 0 -10899396 true "" "plot regulator-policy-Incentivize-ICT"
+"pen-7" 1.0 0 -13840069 true "" "plot regulator-policy-stimulate-demand"
+
+PLOT
+1713
+334
+2015
+571
+ISP size
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -2674135 true "" "plot min-infrastructure-size"
+"pen-1" 1.0 0 -14070903 true "" "plot max-infrastructure-size"
+
+PLOT
+883
+336
+1114
+540
+EC-index
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot EC-index"
+
+PLOT
+892
+553
+1201
+778
+ISP Congestion
+NIL
+NIL
+0.0
+10.0
+0.0
+1.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -16777216 true "" "plot mean-congestion"
+
+PLOT
+2029
+10
+2265
+187
+EC- indexes
+NIL
+NIL
+0.0
+10.0
+0.0
+10.0
+true
+false
+"" ""
+PENS
+"default" 1.0 0 -15040220 true "" "plot economic-efficiency-index"
+"pen-1" 1.0 0 -7500403 true "" "plot universal-access-index"
+"pen-2" 1.0 0 -2674135 true "" "plot innovation-index"
+
+@#$#@#$#@
+## WHAT IS IT?
+
+(a general understanding of what the model is trying to show or explain)
+
+## HOW IT WORKS
+
+(what rules the agents use to create the overall behavior of the model)
+
+## HOW TO USE IT
+
+(how to use the model, including a description of each of the items in the Interface tab)
+
+## THINGS TO NOTICE
+
+(suggested things for the user to notice while running the model)
+
+## THINGS TO TRY
+
+(suggested things for the user to try to do (move sliders, switches, etc.) with the model)
+
+## EXTENDING THE MODEL
+
+(suggested things to add or change in the Code tab to make the model more complicated, detailed, accurate, etc.)
+
+## NETLOGO FEATURES
+
+(interesting or unusual features of NetLogo that the model uses, particularly in the Code tab; or where workarounds were needed for missing features)
+
+## RELATED MODELS
+
+(models in the NetLogo Models Library and elsewhere which are of related interest)
+
+## CREDITS AND REFERENCES
+
+(a reference to the model's URL on the web if it has one, as well as any other necessary credits, citations, and links)
+@#$#@#$#@
+default
+true
+0
+Polygon -7500403 true true 150 5 40 250 150 205 260 250
+
+airplane
+true
+0
+Polygon -7500403 true true 150 0 135 15 120 60 120 105 15 165 15 195 120 180 135 240 105 270 120 285 150 270 180 285 210 270 165 240 180 180 285 195 285 165 180 105 180 60 165 15
+
+arrow
+true
+0
+Polygon -7500403 true true 150 0 0 150 105 150 105 293 195 293 195 150 300 150
+
+box
+false
+0
+Polygon -7500403 true true 150 285 285 225 285 75 150 135
+Polygon -7500403 true true 150 135 15 75 150 15 285 75
+Polygon -7500403 true true 15 75 15 225 150 285 150 135
+Line -16777216 false 150 285 150 135
+Line -16777216 false 150 135 15 75
+Line -16777216 false 150 135 285 75
+
+bug
+true
+0
+Circle -7500403 true true 96 182 108
+Circle -7500403 true true 110 127 80
+Circle -7500403 true true 110 75 80
+Line -7500403 true 150 100 80 30
+Line -7500403 true 150 100 220 30
+
+butterfly
+true
+0
+Polygon -7500403 true true 150 165 209 199 225 225 225 255 195 270 165 255 150 240
+Polygon -7500403 true true 150 165 89 198 75 225 75 255 105 270 135 255 150 240
+Polygon -7500403 true true 139 148 100 105 55 90 25 90 10 105 10 135 25 180 40 195 85 194 139 163
+Polygon -7500403 true true 162 150 200 105 245 90 275 90 290 105 290 135 275 180 260 195 215 195 162 165
+Polygon -16777216 true false 150 255 135 225 120 150 135 120 150 105 165 120 180 150 165 225
+Circle -16777216 true false 135 90 30
+Line -16777216 false 150 105 195 60
+Line -16777216 false 150 105 105 60
+
+car
+false
+0
+Polygon -7500403 true true 300 180 279 164 261 144 240 135 226 132 213 106 203 84 185 63 159 50 135 50 75 60 0 150 0 165 0 225 300 225 300 180
+Circle -16777216 true false 180 180 90
+Circle -16777216 true false 30 180 90
+Polygon -16777216 true false 162 80 132 78 134 135 209 135 194 105 189 96 180 89
+Circle -7500403 true true 47 195 58
+Circle -7500403 true true 195 195 58
+
+circle
+false
+0
+Circle -7500403 true true 0 0 300
+
+circle 2
+false
+0
+Circle -7500403 true true 0 0 300
+Circle -16777216 true false 30 30 240
+
+cow
+false
+0
+Polygon -7500403 true true 200 193 197 249 179 249 177 196 166 187 140 189 93 191 78 179 72 211 49 209 48 181 37 149 25 120 25 89 45 72 103 84 179 75 198 76 252 64 272 81 293 103 285 121 255 121 242 118 224 167
+Polygon -7500403 true true 73 210 86 251 62 249 48 208
+Polygon -7500403 true true 25 114 16 195 9 204 23 213 25 200 39 123
+
+cylinder
+false
+0
+Circle -7500403 true true 0 0 300
+
+dot
+false
+0
+Circle -7500403 true true 90 90 120
+
+face happy
+false
+0
+Circle -7500403 true true 8 8 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Polygon -16777216 true false 150 255 90 239 62 213 47 191 67 179 90 203 109 218 150 225 192 218 210 203 227 181 251 194 236 217 212 240
+
+face neutral
+false
+0
+Circle -7500403 true true 8 7 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Rectangle -16777216 true false 60 195 240 225
+
+face sad
+false
+0
+Circle -7500403 true true 8 8 285
+Circle -16777216 true false 60 75 60
+Circle -16777216 true false 180 75 60
+Polygon -16777216 true false 150 168 90 184 62 210 47 232 67 244 90 220 109 205 150 198 192 205 210 220 227 242 251 229 236 206 212 183
+
+fish
+false
+0
+Polygon -1 true false 44 131 21 87 15 86 0 120 15 150 0 180 13 214 20 212 45 166
+Polygon -1 true false 135 195 119 235 95 218 76 210 46 204 60 165
+Polygon -1 true false 75 45 83 77 71 103 86 114 166 78 135 60
+Polygon -7500403 true true 30 136 151 77 226 81 280 119 292 146 292 160 287 170 270 195 195 210 151 212 30 166
+Circle -16777216 true false 215 106 30
+
+flag
+false
+0
+Rectangle -7500403 true true 60 15 75 300
+Polygon -7500403 true true 90 150 270 90 90 30
+Line -7500403 true 75 135 90 135
+Line -7500403 true 75 45 90 45
+
+flower
+false
+0
+Polygon -10899396 true false 135 120 165 165 180 210 180 240 150 300 165 300 195 240 195 195 165 135
+Circle -7500403 true true 85 132 38
+Circle -7500403 true true 130 147 38
+Circle -7500403 true true 192 85 38
+Circle -7500403 true true 85 40 38
+Circle -7500403 true true 177 40 38
+Circle -7500403 true true 177 132 38
+Circle -7500403 true true 70 85 38
+Circle -7500403 true true 130 25 38
+Circle -7500403 true true 96 51 108
+Circle -16777216 true false 113 68 74
+Polygon -10899396 true false 189 233 219 188 249 173 279 188 234 218
+Polygon -10899396 true false 180 255 150 210 105 210 75 240 135 240
+
+house
+false
+0
+Rectangle -7500403 true true 45 120 255 285
+Rectangle -16777216 true false 120 210 180 285
+Polygon -7500403 true true 15 120 150 15 285 120
+Line -16777216 false 30 120 270 120
+
+leaf
+false
+0
+Polygon -7500403 true true 150 210 135 195 120 210 60 210 30 195 60 180 60 165 15 135 30 120 15 105 40 104 45 90 60 90 90 105 105 120 120 120 105 60 120 60 135 30 150 15 165 30 180 60 195 60 180 120 195 120 210 105 240 90 255 90 263 104 285 105 270 120 285 135 240 165 240 180 270 195 240 210 180 210 165 195
+Polygon -7500403 true true 135 195 135 240 120 255 105 255 105 285 135 285 165 240 165 195
+
+line
+true
+0
+Line -7500403 true 150 0 150 300
+
+line half
+true
+0
+Line -7500403 true 150 0 150 150
+
+pentagon
+false
+0
+Polygon -7500403 true true 150 15 15 120 60 285 240 285 285 120
+
+person
+false
+0
+Circle -7500403 true true 110 5 80
+Polygon -7500403 true true 105 90 120 195 90 285 105 300 135 300 150 225 165 300 195 300 210 285 180 195 195 90
+Rectangle -7500403 true true 127 79 172 94
+Polygon -7500403 true true 195 90 240 150 225 180 165 105
+Polygon -7500403 true true 105 90 60 150 75 180 135 105
+
+plant
+false
+0
+Rectangle -7500403 true true 135 90 165 300
+Polygon -7500403 true true 135 255 90 210 45 195 75 255 135 285
+Polygon -7500403 true true 165 255 210 210 255 195 225 255 165 285
+Polygon -7500403 true true 135 180 90 135 45 120 75 180 135 210
+Polygon -7500403 true true 165 180 165 210 225 180 255 120 210 135
+Polygon -7500403 true true 135 105 90 60 45 45 75 105 135 135
+Polygon -7500403 true true 165 105 165 135 225 105 255 45 210 60
+Polygon -7500403 true true 135 90 120 45 150 15 180 45 165 90
+
+sheep
+false
+15
+Circle -1 true true 203 65 88
+Circle -1 true true 70 65 162
+Circle -1 true true 150 105 120
+Polygon -7500403 true false 218 120 240 165 255 165 278 120
+Circle -7500403 true false 214 72 67
+Rectangle -1 true true 164 223 179 298
+Polygon -1 true true 45 285 30 285 30 240 15 195 45 210
+Circle -1 true true 3 83 150
+Rectangle -1 true true 65 221 80 296
+Polygon -1 true true 195 285 210 285 210 240 240 210 195 210
+Polygon -7500403 true false 276 85 285 105 302 99 294 83
+Polygon -7500403 true false 219 85 210 105 193 99 201 83
+
+square
+false
+0
+Rectangle -7500403 true true 30 30 270 270
+
+square 2
+false
+0
+Rectangle -7500403 true true 30 30 270 270
+Rectangle -16777216 true false 60 60 240 240
+
+star
+false
+0
+Polygon -7500403 true true 151 1 185 108 298 108 207 175 242 282 151 216 59 282 94 175 3 108 116 108
+
+target
+false
+0
+Circle -7500403 true true 0 0 300
+Circle -16777216 true false 30 30 240
+Circle -7500403 true true 60 60 180
+Circle -16777216 true false 90 90 120
+Circle -7500403 true true 120 120 60
+
+tree
+false
+0
+Circle -7500403 true true 118 3 94
+Rectangle -6459832 true false 120 195 180 300
+Circle -7500403 true true 65 21 108
+Circle -7500403 true true 116 41 127
+Circle -7500403 true true 45 90 120
+Circle -7500403 true true 104 74 152
+
+triangle
+false
+0
+Polygon -7500403 true true 150 30 15 255 285 255
+
+triangle 2
+false
+0
+Polygon -7500403 true true 150 30 15 255 285 255
+Polygon -16777216 true false 151 99 225 223 75 224
+
+truck
+false
+0
+Rectangle -7500403 true true 4 45 195 187
+Polygon -7500403 true true 296 193 296 150 259 134 244 104 208 104 207 194
+Rectangle -1 true false 195 60 195 105
+Polygon -16777216 true false 238 112 252 141 219 141 218 112
+Circle -16777216 true false 234 174 42
+Rectangle -7500403 true true 181 185 214 194
+Circle -16777216 true false 144 174 42
+Circle -16777216 true false 24 174 42
+Circle -7500403 false true 24 174 42
+Circle -7500403 false true 144 174 42
+Circle -7500403 false true 234 174 42
+
+turtle
+true
+0
+Polygon -10899396 true false 215 204 240 233 246 254 228 266 215 252 193 210
+Polygon -10899396 true false 195 90 225 75 245 75 260 89 269 108 261 124 240 105 225 105 210 105
+Polygon -10899396 true false 105 90 75 75 55 75 40 89 31 108 39 124 60 105 75 105 90 105
+Polygon -10899396 true false 132 85 134 64 107 51 108 17 150 2 192 18 192 52 169 65 172 87
+Polygon -10899396 true false 85 204 60 233 54 254 72 266 85 252 107 210
+Polygon -7500403 true true 119 75 179 75 209 101 224 135 220 225 175 261 128 261 81 224 74 135 88 99
+
+wheel
+false
+0
+Circle -7500403 true true 3 3 294
+Circle -16777216 true false 30 30 240
+Line -7500403 true 150 285 150 15
+Line -7500403 true 15 150 285 150
+Circle -7500403 true true 120 120 60
+Line -7500403 true 216 40 79 269
+Line -7500403 true 40 84 269 221
+Line -7500403 true 40 216 269 79
+Line -7500403 true 84 40 221 269
+
+wolf
+false
+0
+Polygon -16777216 true false 253 133 245 131 245 133
+Polygon -7500403 true true 2 194 13 197 30 191 38 193 38 205 20 226 20 257 27 265 38 266 40 260 31 253 31 230 60 206 68 198 75 209 66 228 65 243 82 261 84 268 100 267 103 261 77 239 79 231 100 207 98 196 119 201 143 202 160 195 166 210 172 213 173 238 167 251 160 248 154 265 169 264 178 247 186 240 198 260 200 271 217 271 219 262 207 258 195 230 192 198 210 184 227 164 242 144 259 145 284 151 277 141 293 140 299 134 297 127 273 119 270 105
+Polygon -7500403 true true -1 195 14 180 36 166 40 153 53 140 82 131 134 133 159 126 188 115 227 108 236 102 238 98 268 86 269 92 281 87 269 103 269 113
+
+x
+false
+0
+Polygon -7500403 true true 270 75 225 30 30 225 75 270
+Polygon -7500403 true true 30 75 75 30 270 225 225 270
+@#$#@#$#@
+NetLogo 6.1.1
+@#$#@#$#@
+need-to-manually-make-preview-for-this-model
+@#$#@#$#@
+@#$#@#$#@
+<experiments>
+  <experiment name="Innovation + Efficiency (1 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="2"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Innovation + Universal Access (1 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="1"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Universal Access + Innovation (1 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="1"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Universal Access + Efficiency (1 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="2"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Efficiency + Universal Access (1 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="3"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Efficiency + Innovation (1 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="3"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Innovation + Efficiency (3 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="2"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Innovation + Universal Access (3 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="1"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Universal Access + Innovation (3 ISPs)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="1"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Universal Access + Efficiency (3 ISPs)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="2"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Efficiency + Universal Access (3 ISPs)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="3"/>
+    </enumeratedValueSet>
+  </experiment>
+  <experiment name="Efficiency + Innovation (3 ISP)" repetitions="10" runMetricsEveryStep="true">
+    <setup>setup</setup>
+    <go>go</go>
+    <timeLimit steps="2500"/>
+    <metric>ISP-coverage</metric>
+    <metric>ISP-infrastructure-quality</metric>
+    <metric>ISP-infrastructure-size</metric>
+    <metric>mean-congestion</metric>
+    <metric>mean-ISP-access-price</metric>
+    <metric>mean-ISP-utilization-price</metric>
+    <metric>mean-ISP-mg-cost</metric>
+    <metric>AP-population</metric>
+    <metric>AP-average-quality</metric>
+    <metric>AP-average-variety</metric>
+    <metric>min-ICT-tech</metric>
+    <metric>max-ICT-tech</metric>
+    <metric>mean-ICT-tech</metric>
+    <metric>ICT-tech-cost</metric>
+    <metric>regulator-policy-coinvestment</metric>
+    <metric>regulator-policy-assymetric-regulation</metric>
+    <metric>regulator-policy-min-quality</metric>
+    <metric>regulator-policy-min-congestion</metric>
+    <metric>regulator-policy-transparency</metric>
+    <metric>regulator-policy-incentivize-ISP</metric>
+    <metric>regulator-policy-Incentivize-ICT</metric>
+    <metric>regulator-policy-stimulate-demand</metric>
+    <metric>EC-index</metric>
+    <enumeratedValueSet variable="ISP-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-universal-access">
+      <value value="1"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="ICT-initial-population">
+      <value value="3"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="AP-initial-population">
+      <value value="20"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="IU-initial-population">
+      <value value="2000"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-innovation">
+      <value value="2"/>
+    </enumeratedValueSet>
+    <enumeratedValueSet variable="EC-economic-efficiency">
+      <value value="3"/>
+    </enumeratedValueSet>
+  </experiment>
+</experiments>
+@#$#@#$#@
+@#$#@#$#@
+default
+0.0
+-0.2 0 0.0 1.0
+0.0 1 1.0 0.0
+0.2 0 0.0 1.0
+link direction
+true
+0
+Line -7500403 true 150 150 90 180
+Line -7500403 true 150 150 210 180
+@#$#@#$#@
+0
+@#$#@#$#@
